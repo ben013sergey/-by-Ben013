@@ -1,63 +1,53 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// 1. Инициализация (Берет ключ из настроек Vercel)
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+// Ключ нужен только для генерации картинки (она работает через Pollinations, там ключ не важен)
+// Но для анализа текста мы теперь идем через НАШ СЕРВЕР
 
-if (!API_KEY) {
-  console.error("ОШИБКА: Не найден VITE_GEMINI_API_KEY.");
-}
-
-const genAI = new GoogleGenerativeAI(API_KEY || "DUMMY_KEY");
-
-// 2. Функция анализа промпта (для улучшения текста)
+// --- ФУНКЦИЯ 1: АНАЛИЗ ТЕКСТА (Через сервер Vercel) ---
 export const analyzePrompt = async (promptText: string) => {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    console.log("Отправляем запрос на сервер Vercel...");
+    
+    const response = await fetch('/api/gemini', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ prompt: promptText }),
+    });
 
-    const systemInstruction = `
-    Ты помощник для анализа промптов. Верни JSON объект.
-    Структура:
-    {
-      "shortTitle": "Короткое название (3-5 слов) на русском",
-      "category": "Категория (Портрет, Пейзаж, Аниме, Реализм, Фантастика, Другое)",
-      "variants": {
-        "male": "Промпт для парня (en)",
-        "female": "Промпт для девушки (en)",
-        "unisex": "Общий промпт (en)"
-      }
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Ошибка сервера: ${response.status} ${errText}`);
     }
-    Верни ТОЛЬКО чистый JSON.
-    `;
 
-    const result = await model.generateContent([systemInstruction, `Промпт: ${promptText}`]);
-    const response = result.response;
-    const text = response.text();
-    const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-
-    return JSON.parse(cleanJson);
+    const data = await response.json();
+    return data;
 
   } catch (error) {
     console.error("Gemini Error:", error);
+    // Возвращаем заглушку, чтобы интерфейс не завис
     return {
-      shortTitle: "Ошибка генерации",
+      shortTitle: "Ошибка соединения",
       category: "Другое",
-      variants: { male: promptText, female: promptText, unisex: promptText }
+      variants: {
+        male: promptText,
+        female: promptText,
+        unisex: promptText
+      }
     };
   }
 };
 
-// 3. Функция генерации картинки (которой не хватало!)
-// Используем бесплатный API Pollinations, так как он не требует прокси
+// --- ФУНКЦИЯ 2: ГЕНЕРАЦИЯ КАРТИНКИ (Бесплатно через Pollinations) ---
 export const generateNanoBananaImage = async (prompt: string) => {
   try {
-    // Генерируем случайное число, чтобы картинка не кешировалась
     const seed = Math.floor(Math.random() * 10000);
+    // Используем модель Flux, она лучше понимает промпты
     const encodedPrompt = encodeURIComponent(prompt);
-    
-    // Формируем ссылку на картинку
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&width=1024&height=1024&nologo=true`;
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&width=1024&height=1024&nologo=true&model=flux`;
 
-    // Эмулируем задержку, как будто нейросеть думает
+    // Небольшая задержка для красоты
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     return {
