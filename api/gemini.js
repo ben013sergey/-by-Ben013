@@ -22,7 +22,7 @@ export default async function handler(req, res) {
     
     // ИСПОЛЬЗУЕМ СТАНДАРТНУЮ МОДЕЛЬ 1.5 FLASH
     // Она работает 100% стабильно
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
     const systemInstruction = `
     Ты помощник для анализа промптов. Верни JSON.
