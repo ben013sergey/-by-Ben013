@@ -495,6 +495,53 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
     }
   };
 
+  const clearCreateForm = () => {
+    setInputPrompt('');
+    setInputTitle('');
+    setInputCategory('');
+    setInputNote('');
+    setUploadedImage(null);
+    localStorage.removeItem(DRAFT_KEY);
+    setView('list');
+  };
+
+  const handleManualSave = async () => {
+    if (!inputPrompt.trim()) return;
+    setLoading(true);
+
+    try {
+      const finalTitle = inputTitle.trim() ? inputTitle.trim() : "Без названия";
+      const finalCategory = inputCategory ? inputCategory : "Другое";
+
+      const newEntry: PromptData = {
+        id: generateId(),
+        originalPrompt: inputPrompt,
+        model: selectedModel,
+        category: finalCategory,
+        shortTitle: finalTitle,
+        variants: {
+            male: inputPrompt,
+            female: inputPrompt,
+            unisex: inputPrompt
+        },
+        imageBase64: uploadedImage,
+        note: inputNote.trim() || undefined,
+        usageCount: 0,
+        createdAt: Date.now(),
+        generationHistory: []
+      };
+
+      setPrompts(prev => [newEntry, ...prev]);
+      showToast("Промпт сохранен (без обработки)!");
+      clearCreateForm();
+
+    } catch (error) {
+      showToast("Ошибка при сохранении.", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!inputPrompt.trim()) return;
     setLoading(true);
@@ -520,15 +567,8 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
 
       setPrompts(prev => [newEntry, ...prev]);
       showToast("Промпт сохранен в базу!");
+      clearCreateForm();
 
-      // Clear form and draft
-      setInputPrompt('');
-      setInputTitle('');
-      setInputCategory('');
-      setInputNote('');
-      setUploadedImage(null);
-      localStorage.removeItem(DRAFT_KEY);
-      setView('list');
     } catch (error) {
       showToast("Ошибка при обработке. Попробуйте снова.", "error");
     } finally {
@@ -1005,20 +1045,35 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
                    />
                 </div>
 
-                <button
-                  onClick={handleSave}
-                  disabled={loading || !inputPrompt.trim()}
-                  className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-indigo-900/20 flex items-center justify-center gap-2"
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 className="animate-spin" />
-                      Обработка...
-                    </>
-                  ) : (
-                    'Сохранить и обработать'
-                  )}
-                </button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                  <button
+                    onClick={handleManualSave}
+                    disabled={loading || !inputPrompt.trim()}
+                    className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-900/20 active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    {loading ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
+                    Сохранить
+                  </button>
+
+                  <button
+                    onClick={handleSave}
+                    disabled={loading || !inputPrompt.trim()}
+                    className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-indigo-900/20 active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="animate-spin" size={20} />
+                        Обработка...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={20} />
+                        Сохранить и обработать
+                      </>
+                    )}
+                  </button>
+                </div>
+
               </div>
             </div>
           </div>
