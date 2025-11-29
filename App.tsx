@@ -1,13 +1,24 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Search, Loader2, Sparkles, FolderOpen, Upload, Filter, ArrowDownUp, XCircle, MessageCircle, FileText, HardDriveDownload, HardDriveUpload, CheckCircle2, AlertCircle, Save, ChevronDown, Trash2, X, Download, RefreshCw, Wand2, Cloud, Clock, Code, Database, FileSpreadsheet, ChevronUp } from 'lucide-react';
+import { Plus, Search, Loader2, Sparkles, FolderOpen, Upload, Filter, ArrowDownUp, XCircle, MessageCircle, FileText, HardDriveDownload, HardDriveUpload, CheckCircle2, AlertCircle, Save, ChevronDown, Trash2, X, Download, RefreshCw, Wand2, Code, Database, ChevronUp, Send } from 'lucide-react';
 import { PromptData, VALID_CATEGORIES, GeneratedImage } from './types';
 import { analyzePrompt } from './services/geminiService';
 import PromptCard from './components/PromptCard';
 import { EXAMPLE_PROMPTS } from './data/examplePrompts';
 import EditPromptModal from './components/EditPromptModal';
 import { saveToDB, loadFromDB } from './services/db';
-import { yandexDiskService } from './services/yandexDiskService';
+
+declare global {
+  interface Window {
+    Telegram?: {
+      WebApp: {
+        sendData: (data: string) => void;
+        // Add other properties/methods if you use them
+      }
+    }
+  }
+}
+
 
 // Local storage keys
 const STORAGE_KEY = 'promptvault_data_v1';
@@ -56,8 +67,6 @@ function App() {
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'with_photo' | 'without_photo' | 'with_notes'>('newest');
   
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
-  const [isDriveConnected, setIsDriveConnected] = useState(false);
-  const [driveLoading, setDriveLoading] = useState(false);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
 
 
@@ -90,18 +99,6 @@ function App() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        if (yandexDiskService.getAuthStatus()) {
-          console.log('📥 Загружаем базу с Яндекс.Диска...');
-          const diskPrompts = await yandexDiskService.loadFromDisk();
-          if (diskPrompts && diskPrompts.length > 0) {
-            setPrompts(diskPrompts);
-            setIsDriveConnected(true);
-            showToast("✅ База загружена с Яндекс.Диска!");
-            setIsDataLoaded(true);
-            return;
-          }
-        }
-
         const dbPrompts = await loadFromDB<PromptData[]>(STORAGE_KEY);
         if (dbPrompts) {
           setPrompts(dbPrompts);
@@ -168,9 +165,6 @@ function App() {
     const save = async () => {
       try {
         await saveToDB(STORAGE_KEY, prompts);
-        if (isDriveConnected && yandexDiskService.getAuthStatus()) {
-          await yandexDiskService.saveToDisk(prompts);
-        }
         setLastSaved(new Date());
       } catch (e) {
         console.error("DB Save Failed", e);
@@ -178,7 +172,7 @@ function App() {
       }
     };
     save();
-  }, [prompts, isDataLoaded, isDriveConnected]);
+  }, [prompts, isDataLoaded]);
 
   // SAVE EFFECT 2 (Periodic)
   useEffect(() => {
@@ -188,9 +182,6 @@ function App() {
       try {
         if (promptsRef.current.length > 0) {
            await saveToDB(STORAGE_KEY, promptsRef.current);
-           if (isDriveConnected && yandexDiskService.getAuthStatus()) {
-             await yandexDiskService.saveToDisk(promptsRef.current);
-           }
            setLastSaved(new Date());
         }
       } catch (e) {
@@ -199,7 +190,7 @@ function App() {
     }, 30000);
 
     return () => clearInterval(intervalId);
-  }, [isDataLoaded, isDriveConnected]);
+  }, [isDataLoaded]);
 
   useEffect(() => {
     if (toast) {
@@ -409,41 +400,23 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
       showToast("Ошибка при экспорте текста", "error");
     }
   };
-
-  const handleExportCSV = () => {
+  
+  const handleTelegramExport = () => {
     try {
-      const headers = ['ID', 'Date', 'Model', 'Category', 'Title', 'Original Prompt', 'Male Variant', 'Female Variant', 'Unisex Variant', 'Note', 'Usage Count'];
-      const escapeCsv = (str: string | undefined | null) => {
-        if (!str) return '""';
-        return `"${String(str).replace(/"/g, '""')}"`;
-      };
-
-      const rows = prompts.map(p => [
-        p.id,
-        new Date(p.createdAt).toISOString(),
-        p.model,
-        escapeCsv(p.category),
-        escapeCsv(p.shortTitle),
-        escapeCsv(p.originalPrompt),
-        escapeCsv(p.variants.male),
-        escapeCsv(p.variants.female),
-        escapeCsv(p.variants.unisex),
-        escapeCsv(p.note || ''),
-        p.usageCount || 0
-      ]);
-
-      const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.setAttribute("href", url);
-      link.setAttribute("download", `prompts_export_${new Date().toISOString().slice(0, 10)}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      showToast("CSV файл успешно сохранен!", "success");
+      if (window.Telegram && window.Telegram.WebApp) {
+        const dataStr = JSON.stringify(prompts, null, 2);
+        if (dataStr.length <= 4096) {
+          window.Telegram.WebApp.sendData(dataStr);
+          showToast("База отправлена в Telegram!", "success");
+        } else {
+          showToast("База слишком большая для отправки. Скачайте JSON и отправьте вручную.", "error");
+        }
+      } else {
+        showToast("Функция доступна только в приложении Telegram.", "error");
+      }
     } catch (e) {
-      showToast("Ошибка при экспорте CSV", "error");
+      console.error("Telegram export error:", e);
+      showToast("Ошибка при отправке в Telegram.", "error");
     }
   };
 
@@ -739,12 +712,12 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
             </div>
             
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto">
-              <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-lg border border-slate-700 mr-2 overflow-x-auto max-w-full no-scrollbar">
+               <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-lg border border-slate-700 mr-2 overflow-x-auto max-w-full no-scrollbar">
                 
                  <button
                   onClick={handleExtractNotes}
-                  className="p-2 text-slate-400 hover:text-purple-300 hover:bg-slate-700 rounded-md transition-colors relative flex-shrink-0"
-                  title="Авто-извлечение примечаний из текста промпта"
+                  className="p-2 text-slate-400 hover:text-purple-300 hover:bg-slate-700/80 rounded-md transition-all relative flex-shrink-0 active:scale-95 shadow-inner shadow-black/20"
+                  title="Авто-извлечение примечаний"
                 >
                   <Wand2 size={18} />
                 </button>
@@ -753,16 +726,16 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
 
                 <button
                   onClick={handleExportToTS}
-                  className="p-2 text-slate-400 hover:text-blue-400 hover:bg-slate-700 rounded-md transition-colors relative flex-shrink-0"
-                  title="Скачать текущую базу как examplePrompts.ts"
+                  className="p-2 text-slate-400 hover:text-blue-400 hover:bg-slate-700/80 rounded-md transition-all relative flex-shrink-0 active:scale-95 shadow-inner shadow-black/20"
+                  title="Скачать как examplePrompts.ts"
                 >
                   <Code size={18} />
                 </button>
 
                  <button
                   onClick={handleApplyInternalExamples}
-                  className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-slate-700 rounded-md transition-colors relative flex-shrink-0"
-                  title="Применить примеры из файла examplePrompts.ts"
+                  className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-slate-700/80 rounded-md transition-all relative flex-shrink-0 active:scale-95 shadow-inner shadow-black/20"
+                  title="Применить примеры из файла"
                 >
                   <Database size={18} />
                   <div className="absolute top-1 right-0.5 text-[8px] font-bold">+</div>
@@ -772,8 +745,8 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
                 
                 <button
                   onClick={handleLoadExamples}
-                  className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-slate-700 rounded-md transition-colors relative flex-shrink-0"
-                  title="Скачать примеры (JSON) для импорта"
+                  className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-slate-700/80 rounded-md transition-all relative flex-shrink-0 active:scale-95 shadow-inner shadow-black/20"
+                  title="Скачать примеры (JSON)"
                 >
                   <Download size={18} />
                 </button>
@@ -782,59 +755,32 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
                 
                 <button 
                   onClick={handleExportText}
-                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-md transition-colors relative group flex-shrink-0"
+                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-700/80 rounded-md transition-all relative group flex-shrink-0 active:scale-95 shadow-inner shadow-black/20"
                   title="Скачать как текст (.txt)"
                 >
                   <FileText size={18} />
                 </button>
 
-                <button 
-                  onClick={handleExportCSV}
-                  className="p-2 text-slate-400 hover:text-green-400 hover:bg-slate-700 rounded-md transition-colors relative group flex-shrink-0"
-                  title="Скачать как таблицу (.csv)"
-                >
-                  <FileSpreadsheet size={18} />
-                </button>
-                
                 <div className="w-px h-6 bg-slate-700 mx-1 flex-shrink-0"></div>
 
                 <button 
+                  onClick={handleTelegramExport}
+                  className="p-2 text-slate-400 hover:text-sky-400 hover:bg-slate-700/80 rounded-md transition-all flex-shrink-0 active:scale-95 shadow-inner shadow-black/20"
+                  title="Отправить базу в Telegram"
+                >
+                  <Send size={18} />
+                </button>
+
+                <button 
                   onClick={handleBackupDatabase}
-                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-md transition-colors flex-shrink-0"
-                  title="Скачать базу данных (.json) на компьютер"
+                  className="p-2 text-white bg-indigo-600/50 hover:bg-indigo-500/80 rounded-md transition-all flex-shrink-0 active:scale-95 shadow-md shadow-indigo-900/30"
+                  title="Скачать базу данных (.json)"
                 >
                   <HardDriveDownload size={18} />
                 </button>
 
-                {!isDriveConnected && (
-                  <button
-                    onClick={() => {
-                      setDriveLoading(true);
-                      yandexDiskService.signIn();
-                    }}
-                    disabled={driveLoading}
-                    className={`p-2 rounded-md transition-colors flex-shrink-0 ${
-                      driveLoading 
-                        ? 'text-slate-600 cursor-not-allowed' 
-                        : 'text-slate-400 hover:text-yellow-400 hover:bg-slate-700'
-                    }`}
-                    title="Войти в Яндекс.Диск"
-                  >
-                    {driveLoading ? <Loader2 size={18} className="animate-spin" /> : <Cloud size={18} />}
-                  </button>
-                )}
-
-                {isDriveConnected && (
-                  <div className="p-2 text-yellow-400 flex items-center gap-1 text-xs flex-shrink-0">
-                    <Cloud size={16} />
-                    <span>Yandex</span>
-                  </div>
-                )}
-
-                <div className="w-px h-6 bg-slate-700 mx-1 flex-shrink-0"></div>
-                                
                 <label 
-                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-md transition-colors cursor-pointer flex-shrink-0"
+                  className="p-2 text-white bg-emerald-600/50 hover:bg-emerald-500/80 rounded-md transition-all cursor-pointer flex-shrink-0 active:scale-95 shadow-md shadow-emerald-900/30"
                   title="Загрузить базу данных (Импорт)"
                 >
                   <HardDriveUpload size={18} />
@@ -1158,8 +1104,7 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
                   <span>Показано {Math.min(visibleCount, allFilteredPrompts.length)} из {allFilteredPrompts.length} промптов</span>
                   {lastSaved && (
                      <div className="flex items-center gap-1.5 text-slate-500/80 bg-slate-900/50 px-3 py-1 rounded-full border border-slate-800">
-                       <Cloud size={10} />
-                       <span>Сохранено: {lastSaved.toLocaleTimeString('ru-RU')}</span>
+                        <span>Сохранено: {lastSaved.toLocaleTimeString('ru-RU')}</span>
                      </div>
                   )}
                 </div>
