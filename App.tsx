@@ -1,3 +1,5 @@
+import { saveToYandexDisk, loadFromYandexDisk } from './services/yandexDiskService';
+import { Cloud, CloudDownload, RefreshCw } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Search, Loader2, Sparkles, FolderOpen, Upload, Filter, ArrowDownUp, XCircle, MessageCircle, FileText, HardDriveDownload, HardDriveUpload, CheckCircle2, AlertCircle, Save, ChevronDown, Trash2, X, Download, RefreshCw, Wand2, Code, Database, ChevronUp, Send, CloudLightning } from 'lucide-react';
 import { PromptData, VALID_CATEGORIES, GeneratedImage } from './types';
@@ -98,28 +100,30 @@ function App() {
     });
   };
 
-  // INITIAL DATA LOAD
+  // INITIAL DATA LOAD (С Яндексом)
   useEffect(() => {
     const loadData = async () => {
+      setIsDataLoaded(false); // Показываем спиннер
       try {
-        const dbPrompts = await loadFromDB<PromptData[]>(STORAGE_KEY);
-        if (dbPrompts) {
-          setPrompts(dbPrompts);
+        // 1. Сначала пробуем загрузить из Яндекса (это приоритет)
+        const cloudData = await loadFromYandexDisk();
+        
+        if (cloudData && Array.isArray(cloudData) && cloudData.length > 0) {
+          setPrompts(cloudData);
+          showToast("☁️ База синхронизирована с Яндекс.Диском!", "success");
+          // Обновляем и локальную копию
+          await saveToDB(STORAGE_KEY, cloudData);
         } else {
-          const lsPrompts = localStorage.getItem(STORAGE_KEY);
-          if (lsPrompts) {
-            try {
-              const parsed = JSON.parse(lsPrompts);
-              setPrompts(parsed);
-              await saveToDB(STORAGE_KEY, parsed);
-            } catch (e) {
-              console.error("Migration failed", e);
-            }
-          }
+          // 2. Если в облаке пусто, берем из памяти телефона
+          const dbPrompts = await loadFromDB<PromptData[]>(STORAGE_KEY);
+          if (dbPrompts) setPrompts(dbPrompts);
         }
       } catch (e) {
-        console.error("Failed to load data", e);
-        showToast("Ошибка инициализации базы данных", "error");
+        console.error("Load Error", e);
+        // Если ошибка интернета, грузим локально
+        const dbPrompts = await loadFromDB<PromptData[]>(STORAGE_KEY);
+        if (dbPrompts) setPrompts(dbPrompts);
+        showToast("Нет связи с Яндексом, загружена локальная копия", "error");
       } finally {
         setIsDataLoaded(true);
       }
