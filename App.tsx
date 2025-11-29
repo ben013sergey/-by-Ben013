@@ -587,4 +587,234 @@ function App() {
                   className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-slate-700/80 rounded-md transition-all relative flex-shrink-0 active:scale-95 shadow-inner shadow-black/20"
                   title="Скачать примеры (JSON)"
                 >
-                  <Down
+                  <Download size={18} />
+                </button>
+
+                <button 
+                  onClick={handleBackupDatabase}
+                  className="p-2 text-white bg-slate-700 hover:bg-slate-600 rounded-md transition-all flex-shrink-0 active:scale-95"
+                  title="Скачать базу в браузер (Локально)"
+                >
+                  <HardDriveDownload size={18} />
+                </button>
+
+                {/* --- НОВЫЕ КНОПКИ ЯНДЕКС ДИСК --- */}
+                
+                <button 
+                  onClick={async () => {
+                    if(!confirm("Заменить текущую базу версией с Яндекс.Диска?")) return;
+                    const toastId = showToast("Загрузка с Яндекса...", "success");
+                    try {
+                       const data = await loadFromYandexDisk();
+                       if (data) {
+                         setPrompts(data);
+                         showToast("✅ Загружено из облака!", "success");
+                         await saveToDB(STORAGE_KEY, data); // Сохраняем и локально
+                       } else {
+                         showToast("Файл на Диске пуст или не найден", "error");
+                       }
+                    } catch(e) {
+                       showToast("Ошибка загрузки", "error");
+                    }
+                  }}
+                  className="p-2 text-white bg-blue-600 hover:bg-blue-500 rounded-md transition-all flex-shrink-0 active:scale-95 shadow-md"
+                  title="Скачать с Яндекс.Диска"
+                >
+                  <CloudDownload size={18} />
+                </button>
+
+                <button 
+                  onClick={async () => {
+                    const toastId = showToast("Сохранение на Яндекс.Диск...", "success");
+                    try {
+                       await saveToYandexDisk(prompts);
+                       setLastSaved(new Date());
+                       showToast("✅ Сохранено в облако!", "success");
+                    } catch(e) {
+                       showToast("Ошибка сохранения", "error");
+                    }
+                  }}
+                  className="p-2 text-white bg-red-600 hover:bg-red-500 rounded-md transition-all flex-shrink-0 active:scale-95 shadow-md"
+                  title="Сохранить на Яндекс.Диск"
+                >
+                  <Cloud size={18} />
+                  <span className="ml-1 text-[10px] font-bold">Ya</span>
+                </button>
+                
+                {/* ---------------------------------- */}
+
+                <div className="w-px h-6 bg-slate-700 mx-1 flex-shrink-0"></div>
+
+                <label 
+                  className="p-2 text-white bg-emerald-600/50 hover:bg-emerald-500/80 rounded-md transition-all cursor-pointer flex-shrink-0 active:scale-95 shadow-md shadow-emerald-900/30"
+                  title="Загрузить базу данных (Импорт файла)"
+                >
+                  <HardDriveUpload size={18} />
+                  <input type="file" accept=".json" onChange={handleImport} className="hidden" />
+                </label>
+              </div>
+
+              <button
+                onClick={() => setView(view === 'list' ? 'create' : 'list')}
+                className={`flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
+                  view === 'list' 
+                    ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' 
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                }`}
+              >
+                {view === 'list' ? (
+                  <>
+                    <Plus size={18} />
+                    <span className="hidden sm:inline">Новый</span>
+                    <span className="inline sm:hidden">Создать</span>
+                  </>
+                ) : (
+                  <>
+                    <FolderOpen size={18} />
+                    <span>Просмотр</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+          {/* ...Остальной интерфейс поиска и фильтров... */}
+          {view === 'list' && prompts.length > 0 && (
+            <div className="flex flex-col md:flex-row gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="relative flex-grow">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                <input
+                  type="text"
+                  placeholder="Поиск..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-10 pr-10 py-2 text-sm focus:outline-none focus:border-indigo-500 transition-colors"
+                />
+                {searchQuery && (
+                  <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"><XCircle size={16} /></button>
+                )}
+              </div>
+              
+              <div className="flex gap-2 flex-wrap sm:flex-nowrap">
+                <div className="relative flex-grow sm:flex-grow-0 sm:min-w-[200px]">
+                  <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+                  <select value={selectedCategoryFilter} onChange={(e) => setSelectedCategoryFilter(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm appearance-none focus:outline-none focus:border-indigo-500 cursor-pointer text-slate-300 hover:bg-slate-900">
+                    <option value="all">Все категории ({prompts.length})</option>
+                    {allCategories.map(cat => (
+                      <option key={cat} value={cat}>{cat} ({categoryCounts[cat] || 0})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="relative flex-grow sm:flex-grow-0 sm:min-w-[160px]">
+                  <ArrowDownUp className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+                  <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as any)} className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm appearance-none focus:outline-none focus:border-indigo-500 cursor-pointer text-slate-300 hover:bg-slate-900">
+                    <option value="newest">Сначала новые</option>
+                    <option value="oldest">Сначала старые</option>
+                    <option value="with_photo">Сначала с фото</option>
+                    <option value="without_photo">Сначала без фото</option>
+                    <option value="with_notes">Сначала с примечанием</option>
+                  </select>
+                </div>
+                {(searchQuery || selectedCategoryFilter !== 'all' || sortOrder !== 'newest') && (
+                  <button onClick={resetFilters} className="p-2 bg-slate-950 border border-red-500/30 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors flex-shrink-0" title="Сбросить все фильтры">
+                    <RefreshCw size={18} />
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </header>
+
+      <main className="max-w-5xl mx-auto px-4 py-8">
+        {view === 'create' && (
+          <div className="max-w-2xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-xl">
+              <h2 className="text-2xl font-bold text-white mb-6">Добавить новый промпт</h2>
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Модель нейросети</label>
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                    {['Flux 2', 'Nana Banana', 'Midjourney'].map(model => (
+                      <button key={model} onClick={() => setSelectedModel(model)} className={`py-2 px-2 sm:px-3 rounded-lg text-xs sm:text-sm font-medium border transition-all truncate ${selectedModel === model ? 'bg-indigo-500/20 border-indigo-500 text-indigo-300' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'}`}>{model}</button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-2">Название (Опционально)</label>
+                    <input type="text" value={inputTitle} onChange={(e) => setInputTitle(e.target.value)} placeholder="ИИ придумает, если пусто" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-2">Категория (Или своя)</label>
+                    <input list="category-options" value={inputCategory} onChange={(e) => setInputCategory(e.target.value)} placeholder="Выберите или введите..." className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm" />
+                    <datalist id="category-options">{VALID_CATEGORIES.map(cat => (<option key={cat} value={cat} />))}</datalist>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Референсное изображение (опционально)</label>
+                  <div className={`border-2 border-dashed rounded-xl p-4 transition-colors ${uploadedImage ? 'border-indigo-500/50 bg-indigo-500/5' : 'border-slate-700 hover:border-slate-600 bg-slate-800'}`}>
+                    {uploadedImage ? (
+                      <div className="relative group">
+                         <img src={uploadedImage} alt="Preview" className="h-48 w-full object-contain rounded-lg" />
+                         <button onClick={() => setUploadedImage(null)} className="absolute top-2 right-2 bg-red-500/80 p-1 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"><Plus className="rotate-45" size={20}/></button>
+                      </div>
+                    ) : (
+                      <label className="flex flex-col items-center justify-center cursor-pointer h-32"><Upload className="text-slate-500 mb-2" size={24} /><span className="text-sm text-slate-400">Нажмите, чтобы загрузить</span><input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} /></label>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Ваш промпт</label>
+                  <textarea value={inputPrompt} onChange={(e) => setInputPrompt(e.target.value)} placeholder="Опишите, что вы хотите сгенерировать..." className="w-full h-40 bg-slate-950 border border-slate-700 rounded-xl p-4 text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all resize-none" />
+                </div>
+                <div>
+                   <label className="block text-sm font-medium text-slate-400 mb-2">Примечание (Опционально)</label>
+                   <textarea value={inputNote} onChange={(e) => setInputNote(e.target.value)} placeholder="Любые заметки..." className="w-full h-20 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm resize-none" />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                  <button onClick={handleManualSave} disabled={loading || !inputPrompt.trim()} className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-emerald-900/20 active:scale-95 flex items-center justify-center gap-2">{loading ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />} Сохранить</button>
+                  <button onClick={handleSave} disabled={loading || !inputPrompt.trim()} className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold rounded-xl transition-all shadow-lg shadow-indigo-900/20 active:scale-95 flex items-center justify-center gap-2">{loading ? (<><Loader2 className="animate-spin" size={20} />Обработка...</>) : (<><Sparkles size={20} />Сохранить и обработать</>)}</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {view === 'list' && (
+          <div className="space-y-12 animate-in fade-in duration-500">
+            {prompts.length === 0 ? (
+              <div className="text-center py-20">
+                <div className="inline-flex items-center justify-center w-20 h-20 bg-slate-800 rounded-full mb-6 text-slate-600"><Search size={40} /></div>
+                <h3 className="text-xl font-semibold text-slate-300 mb-2">Здесь пока пусто</h3>
+                <p className="text-slate-500 max-w-md mx-auto mb-6">Создайте свой первый промпт или загрузите базу данных.</p>
+                <div className="flex justify-center gap-6">
+                  <button onClick={() => setView('create')} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold shadow-lg shadow-indigo-900/20 active:scale-95 transition-all flex items-center gap-2"><Plus size={20} /> Создать промпт</button>
+                  <label className="px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold shadow-lg border-2 border-indigo-500/30 hover:border-indigo-400 active:scale-95 transition-all cursor-pointer flex items-center gap-2"><HardDriveUpload size={20} className="text-indigo-400" /> Загрузить базу <input type="file" accept=".json" onChange={handleImport} className="hidden" /></label>
+                </div>
+              </div>
+            ) : allFilteredPrompts.length === 0 ? (
+               <div className="text-center py-20 text-slate-500"><p>Ничего не найдено по вашему запросу.</p><button onClick={resetFilters} className="text-indigo-400 mt-2 hover:underline">Сбросить фильтры</button></div>
+            ) : (
+              <>
+                {sortedCategories.map((category) => (
+                  <div key={category} className="space-y-4">
+                    <div className="flex items-center gap-4"><h2 className="text-2xl font-bold text-white tracking-tight pl-2 border-l-4 border-indigo-500">{category}</h2><div className="h-px flex-grow bg-slate-800"></div></div>
+                    <div className="grid grid-cols-1 gap-6">{groupedPrompts[category].map((prompt) => (<PromptCard key={prompt.id} data={prompt} index={allFilteredPrompts.indexOf(prompt)} onDelete={handleDelete} onCategoryUpdate={handleCategoryUpdate} onEdit={setEditingPrompt} onUsageUpdate={handleUsageUpdate} onAddHistory={handleAddHistory}/>))}</div>
+                  </div>
+                ))}
+                {hasMore && (<div className="flex justify-center pt-8"><button onClick={() => setVisibleCount(prev => prev + ITEMS_PER_PAGE)} className="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-full font-medium transition-all shadow-lg border border-slate-700 hover:border-slate-500"><ChevronDown size={20} /> Показать еще ({allFilteredPrompts.length - visibleCount})</button></div>)}
+                <div className="text-center text-slate-600 text-xs mt-6 flex flex-col items-center gap-2"><span>Показано {Math.min(visibleCount, allFilteredPrompts.length)} из {allFilteredPrompts.length} промптов</span>{lastSaved && (<div className="flex items-center gap-1.5 text-slate-500/80 bg-slate-900/50 px-3 py-1 rounded-full border border-slate-800"><span>Сохранено: {lastSaved.toLocaleTimeString('ru-RU')}</span></div>)}</div>
+              </>
+            )}
+          </div>
+        )}
+      </main>
+
+      {showScrollTopButton && (
+        <button onClick={scrollToTop} className="fixed bottom-6 right-6 z-50 w-12 h-12 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-lg transition-all duration-300 animate-in fade-in slide-in-from-bottom-5 hover:scale-110 active:scale-100" title="Наверх"><ChevronUp size={24} /></button>
+      )}
+    </div>
+  );
+}
+
+export default App;
