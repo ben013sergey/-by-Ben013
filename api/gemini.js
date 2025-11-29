@@ -26,7 +26,7 @@ export default async function handler(req, res) {
     
     // ИСПОЛЬЗУЕМ САМУЮ НОВУЮ МОДЕЛЬ
     // Если она вдруг не сработает, поменяйте на "gemini-1.5-flash"
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro-exp" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
 
     const systemInstruction = `
     Ты помощник для анализа промптов.
