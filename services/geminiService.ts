@@ -109,31 +109,42 @@ export const generateNanoBananaImage = async (prompt: string, referenceImageBase
     // Add text prompt
     parts.push({ text: prompt });
 
-    // Enhance prompt if upscale is requested to encourage detail
+    // Enhance prompt text logic can be kept if desired, but imageSize is the key for resolution
     if (upscale) {
-      parts.push({ text: " high resolution, 4k, highly detailed, sharp focus" });
+      parts.push({ text: " high resolution, 2K, highly detailed, sharp focus" });
     }
 
     let response;
     
     // Attempt 1: Try High-Quality Model
     try {
+      const config: any = {
+        imageConfig: {
+          aspectRatio: aspectRatio
+        }
+      };
+
+      if (upscale) {
+        // Explicitly request 2K resolution
+        config.imageConfig.imageSize = '2K';
+      }
+
       response = await ai.models.generateContent({
         model: 'gemini-3-pro-image-preview',
         contents: {
           parts: parts
         },
-        config: {
-          imageConfig: {
-            aspectRatio: aspectRatio
-            // Note: Currently 'imageSize' param might not be fully supported in all client versions or regions, 
-            // but requesting the pro model is the key for higher quality.
-            // We rely on the model choice and prompt enhancement for "upscaling".
-          }
-        }
+        config: config
       });
     } catch (primaryError: any) {
-      // Check for permission/not found errors
+      // If Upscale was specifically requested and failed, stop here and inform user.
+      // Do NOT fallback to low-res model if user wanted high-res.
+      if (upscale) {
+        console.error("Upscale failed:", primaryError);
+        throw new Error(`UPSCALE_FAILED: Не удалось сгенерировать изображение в 2K разрешении. ${primaryError.message || ''}`);
+      }
+
+      // Check for permission/not found errors for standard fallback
       if (primaryError.message && (
           primaryError.message.includes('403') || 
           primaryError.message.includes('404') || 

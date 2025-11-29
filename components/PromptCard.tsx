@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { PromptData, GenderVariant, VALID_CATEGORIES, AspectRatio, GeneratedImage } from '../types';
 import { Copy, Check, Trash2, Image as ImageIcon, X, Maximize2, Clock, Edit2, Play, Loader2, Upload, Pencil, Ratio, ZoomIn, ZoomOut, Download, Move, RotateCcw, StickyNote, History, ChevronRight, ChevronDown, Scaling } from 'lucide-react';
@@ -99,7 +100,11 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
       }
 
     } catch (e: any) {
-      setGenError(e.message || "Ошибка генерации. Проверьте API ключ или лимиты.");
+      if (e.message && e.message.includes('UPSCALE_FAILED')) {
+        setGenError(e.message);
+      } else {
+        setGenError(e.message || "Ошибка генерации. Проверьте API ключ или лимиты.");
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -107,6 +112,9 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   
   const analyzeError = (errorMsg: string): string => {
       const lowerMsg = errorMsg.toLowerCase();
+      if (lowerMsg.includes('upscale_failed')) {
+          return 'Ошибка Upscale: Не удалось создать изображение в 2K. Возможно, функция недоступна для вашего аккаунта или модель перегружена.';
+      }
       if (lowerMsg.includes('403') || lowerMsg.includes('permission_denied') || lowerMsg.includes('api key')) {
           return 'Вероятная причина: Проблема с API ключом. Убедитесь, что он действителен и имеет доступ к модели.';
       }
@@ -557,6 +565,21 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                         <p className="font-bold">Ошибка генерации</p>
                         <p className="font-mono text-[10px] break-words">{genError}</p>
                         <p className="text-red-400/80 text-[10px] border-t border-red-500/20 pt-2 mt-2">{analyzeError(genError)}</p>
+                        
+                        {/* Special button for upscale failure */}
+                        {genError.includes('UPSCALE_FAILED') && (
+                          <button
+                            onClick={() => {
+                              setUpscale(false);
+                              // Optional: Immediately retry without upscale or just let user click Test again
+                              // handleTestGeneration(); 
+                            }}
+                            className="w-full py-1.5 bg-red-500 text-white rounded font-bold text-[10px] hover:bg-red-600 transition-colors"
+                          >
+                            Отключить Upscale и повторить
+                          </button>
+                        )}
+
                         <button
                             onClick={() => navigator.clipboard.writeText(genError)}
                             className="w-full text-center text-[10px] text-red-400/80 mt-1 hover:underline"

@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Search, Loader2, Sparkles, FolderOpen, Upload, Filter, ArrowDownUp, XCircle, MessageCircle, FileText, HardDriveDownload, HardDriveUpload, CheckCircle2, AlertCircle, Save, ChevronDown, Trash2, X, Download, RefreshCw, Wand2, Cloud, Clock, Code, Database, FileSpreadsheet, ChevronUp } from 'lucide-react';
 import { PromptData, VALID_CATEGORIES, GeneratedImage } from './types';
@@ -476,6 +475,10 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
       importedData.forEach((item: PromptData) => {
         if (!item.id) item.id = generateId();
         if (item.usageCount === undefined) item.usageCount = 0;
+        
+        // Ensure generationHistory is preserved during import
+        if (!item.generationHistory) item.generationHistory = [];
+        
         if (item.variants) {
           newMap.set(item.id, item);
         }
