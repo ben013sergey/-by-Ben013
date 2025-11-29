@@ -1,7 +1,5 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
 export default async function handler(req, res) {
-  // Разрешаем CORS
+  // 1. CORS заголовки
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -17,14 +15,10 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "API Key не найден" });
   }
 
-  try {
-    const genAI = new GoogleGenerativeAI(API_KEY);
-    
-    // ИСПОЛЬЗУЕМ СТАНДАРТНУЮ МОДЕЛЬ 1.5 FLASH
-    // Она работает 100% стабильно
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+  // 2. ФОРМИРУЕМ ЗАПРОС ВРУЧНУЮ (Без библиотек)
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
 
-    const systemInstruction = `
+  const systemInstruction = `
     Ты помощник для анализа промптов. Верни JSON.
     Структура:
     {
@@ -36,22 +30,43 @@ export default async function handler(req, res) {
         "unisex": "Промпт (EN)"
       }
     }
-    Верни ТОЛЬКО чистый JSON.
-    `;
+  В ответе должен быть ТОЛЬКО JSON. Никаких markdown символов.
+  `;
 
-    const result = await model.generateContent([systemInstruction, `Промпт: ${prompt}`]);
-    const response = result.response;
-    const text = response.text();
+    const requestBody = {
+    contents: [{
+      parts: [{
+        text: `${systemInstruction}\n\nПромпт пользователя: ${prompt}`
+      }]
+    }]
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error?.message || "Ошибка Google API");
+    }
+
+    // 3. Достаем текст из ответа Google
+    const text = data.candidates[0].content.parts[0].text;
     
-    // Чистка JSON
+    // Чистим JSON
     const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    const data = JSON.parse(cleanJson);
+    const finalData = JSON.parse(cleanJson);
 
-    return res.status(200).json(data);
+    return res.status(200).json(finalData);
 
   } catch (error) {
-    console.error("Server Error:", error);
-    // Возвращаем текст ошибки, чтобы видеть в консоли
+    console.error("API Error:", error);
     return res.status(500).json({ error: error.message });
   }
 }
