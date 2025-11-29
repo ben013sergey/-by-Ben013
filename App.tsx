@@ -1,6 +1,8 @@
+
+
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Search, Loader2, Sparkles, FolderOpen, Upload, Filter, ArrowDownUp, XCircle, MessageCircle, FileText, HardDriveDownload, HardDriveUpload, CheckCircle2, AlertCircle, Save, ChevronDown, Trash2, X, Download, RefreshCw, Wand2, Cloud, Clock, Code, Database } from 'lucide-react';
-import { PromptData, VALID_CATEGORIES } from './types';
+import { Plus, Search, Loader2, Sparkles, FolderOpen, Upload, Filter, ArrowDownUp, XCircle, MessageCircle, FileText, HardDriveDownload, HardDriveUpload, CheckCircle2, AlertCircle, Save, ChevronDown, Trash2, X, Download, RefreshCw, Wand2, Cloud, Clock, Code, Database, FileSpreadsheet, ChevronUp } from 'lucide-react';
+import { PromptData, VALID_CATEGORIES, GeneratedImage } from './types';
 import { analyzePrompt } from './services/geminiService';
 import PromptCard from './components/PromptCard';
 import { EXAMPLE_PROMPTS } from './data/examplePrompts';
@@ -10,6 +12,7 @@ import { yandexDiskService } from './services/yandexDiskService';
 
 // Local storage keys
 const STORAGE_KEY = 'promptvault_data_v1';
+const DRAFT_KEY = 'promptvault_create_draft';
 const ITEMS_PER_PAGE = 20;
 
 // Simple Toast Component
@@ -56,16 +59,38 @@ function App() {
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const [isDriveConnected, setIsDriveConnected] = useState(false);
   const [driveLoading, setDriveLoading] = useState(false);
+  const [showScrollTopButton, setShowScrollTopButton] = useState(false);
+
 
   useEffect(() => {
     promptsRef.current = prompts;
   }, [prompts]);
 
-  // INITIAL DATA LOAD - попытка загрузить с Яндекс.Диска, затем с IndexedDB
+  // Scroll-to-Top Logic
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.scrollY > 300) {
+        setShowScrollTopButton(true);
+      } else {
+        setShowScrollTopButton(false);
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollToTop = () => {
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    });
+  };
+
+  // INITIAL DATA LOAD
   useEffect(() => {
     const loadData = async () => {
       try {
-        // 1. Проверяем авторизацию Яндекса
         if (yandexDiskService.getAuthStatus()) {
           console.log('📥 Загружаем базу с Яндекс.Диска...');
           const diskPrompts = await yandexDiskService.loadFromDisk();
@@ -78,12 +103,10 @@ function App() {
           }
         }
 
-        // 2. Если Яндекс не авторизован, загружаем с IndexedDB
         const dbPrompts = await loadFromDB<PromptData[]>(STORAGE_KEY);
         if (dbPrompts) {
           setPrompts(dbPrompts);
         } else {
-          // 3. Migration: Check LocalStorage if DB is empty
           const lsPrompts = localStorage.getItem(STORAGE_KEY);
           if (lsPrompts) {
             try {
@@ -106,20 +129,49 @@ function App() {
     loadData();
   }, []);
 
-  // SAVE EFFECT 1: Сохраняем при каждом изменении
+  // LOAD DRAFT FOR CREATE FORM
+  useEffect(() => {
+    const draft = localStorage.getItem(DRAFT_KEY);
+    if (draft) {
+      try {
+        const parsed = JSON.parse(draft);
+        if (parsed.inputPrompt) setInputPrompt(parsed.inputPrompt);
+        if (parsed.inputTitle) setInputTitle(parsed.inputTitle);
+        if (parsed.inputCategory) setInputCategory(parsed.inputCategory);
+        if (parsed.inputNote) setInputNote(parsed.inputNote);
+        if (parsed.selectedModel) setSelectedModel(parsed.selectedModel);
+        // We skip image restoration to avoid quota issues with LS
+      } catch (e) {
+        console.error("Failed to load draft", e);
+      }
+    }
+  }, []);
+
+  // AUTO-SAVE DRAFT FOR CREATE FORM
+  useEffect(() => {
+    if (view === 'create') {
+      const draftData = {
+        inputPrompt,
+        inputTitle,
+        inputCategory,
+        inputNote,
+        selectedModel
+      };
+      // Debounce saving slightly or just save on every change (LS is fast enough for text)
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draftData));
+    }
+  }, [inputPrompt, inputTitle, inputCategory, inputNote, selectedModel, view]);
+
+  // SAVE EFFECT 1
   useEffect(() => {
     if (!isDataLoaded) return;
     
     const save = async () => {
       try {
-        // Сохраняем локально в IndexedDB
         await saveToDB(STORAGE_KEY, prompts);
-        
-        // Если авторизованы в Яндексе, сохраняем там
         if (isDriveConnected && yandexDiskService.getAuthStatus()) {
           await yandexDiskService.saveToDisk(prompts);
         }
-        
         setLastSaved(new Date());
       } catch (e) {
         console.error("DB Save Failed", e);
@@ -129,7 +181,7 @@ function App() {
     save();
   }, [prompts, isDataLoaded, isDriveConnected]);
 
-  // SAVE EFFECT 2: Периодическое сохранение каждые 30 секунд
+  // SAVE EFFECT 2 (Periodic)
   useEffect(() => {
     if (!isDataLoaded) return;
 
@@ -137,11 +189,9 @@ function App() {
       try {
         if (promptsRef.current.length > 0) {
            await saveToDB(STORAGE_KEY, promptsRef.current);
-           
            if (isDriveConnected && yandexDiskService.getAuthStatus()) {
              await yandexDiskService.saveToDisk(promptsRef.current);
            }
-           
            setLastSaved(new Date());
         }
       } catch (e) {
@@ -190,22 +240,16 @@ function App() {
     }
   };
   
-  // Функция для применения примеров прямо из кода (Import from source)
   const handleApplyInternalExamples = () => {
     try {
-      // 1. Создаем Set из существующих оригинальных промптов для быстрой проверки
       const existingPrompts = new Set(promptsRef.current.map(p => p.originalPrompt?.trim()));
-      
-      // 2. Фильтруем примеры
       const newPrompts = EXAMPLE_PROMPTS.filter(ex => {
-        // Если у примера нет текста промпта или он уже есть в базе - пропускаем
         return ex.originalPrompt && !existingPrompts.has(ex.originalPrompt.trim());
       }).map(ex => ({
         ...ex,
-        id: generateId(), // Генерируем новые ID
+        id: generateId(),
         createdAt: Date.now(),
         usageCount: 0,
-        // Гарантируем наличие полей, если они отсутствуют в Partial
         variants: ex.variants || { 
           male: ex.originalPrompt || '', 
           female: ex.originalPrompt || '', 
@@ -224,20 +268,17 @@ function App() {
 
       setPrompts(prev => [...newPrompts, ...prev]);
       showToast(`Добавлено ${newPrompts.length} новых примеров (дубликаты пропущены)!`);
-      
     } catch (e) {
       console.error(e);
       showToast("Ошибка при импорте примеров", "error");
     }
   };
 
-  // Функция для создания файла examplePrompts.ts из текущей базы
   const handleExportToTS = () => {
     try {
-      // Очищаем данные от служебных полей для чистого файла примеров
-      const cleanPrompts = prompts.map(({ id, usageCount, createdAt, ...rest }) => ({
+      const cleanPrompts = prompts.map(({ id, usageCount, createdAt, generationHistory, ...rest }) => ({
         ...rest,
-        createdAt: Date.now() // Ставим свежую дату или 0
+        createdAt: Date.now()
       }));
 
       const content = `
@@ -268,7 +309,6 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
 
     const updatedPrompts = prompts.map(p => {
       let foundNotes: string[] = [];
-
       const cleanText = (text: string) => {
         let hasMatch = false;
         const cleaned = text.replace(regex, (match, content) => {
@@ -371,6 +411,43 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
     }
   };
 
+  const handleExportCSV = () => {
+    try {
+      const headers = ['ID', 'Date', 'Model', 'Category', 'Title', 'Original Prompt', 'Male Variant', 'Female Variant', 'Unisex Variant', 'Note', 'Usage Count'];
+      const escapeCsv = (str: string | undefined | null) => {
+        if (!str) return '""';
+        return `"${String(str).replace(/"/g, '""')}"`;
+      };
+
+      const rows = prompts.map(p => [
+        p.id,
+        new Date(p.createdAt).toISOString(),
+        p.model,
+        escapeCsv(p.category),
+        escapeCsv(p.shortTitle),
+        escapeCsv(p.originalPrompt),
+        escapeCsv(p.variants.male),
+        escapeCsv(p.variants.female),
+        escapeCsv(p.variants.unisex),
+        escapeCsv(p.note || ''),
+        p.usageCount || 0
+      ]);
+
+      const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `prompts_export_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast("CSV файл успешно сохранен!", "success");
+    } catch (e) {
+      showToast("Ошибка при экспорте CSV", "error");
+    }
+  };
+
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -438,16 +515,19 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
         note: inputNote.trim() || undefined,
         usageCount: 0,
         createdAt: Date.now(),
+        generationHistory: []
       };
 
       setPrompts(prev => [newEntry, ...prev]);
       showToast("Промпт сохранен в базу!");
 
+      // Clear form and draft
       setInputPrompt('');
       setInputTitle('');
       setInputCategory('');
       setInputNote('');
       setUploadedImage(null);
+      localStorage.removeItem(DRAFT_KEY);
       setView('list');
     } catch (error) {
       showToast("Ошибка при обработке. Попробуйте снова.", "error");
@@ -482,6 +562,17 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
     }));
   };
 
+  const handleAddHistory = (id: string, image: GeneratedImage) => {
+    setPrompts(prev => prev.map(p => {
+      if (p.id === id) {
+        const prevHistory = p.generationHistory || [];
+        // Limit history to 5 items
+        return { ...p, generationHistory: [image, ...prevHistory].slice(0, 5) };
+      }
+      return p;
+    }));
+  };
+
   const handleUpdatePrompt = (updatedData: PromptData) => {
     setPrompts(prev => prev.map(p => p.id === updatedData.id ? updatedData : p));
     setEditingPrompt(null);
@@ -495,7 +586,13 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
     showToast("Фильтры сброшены");
   };
 
+  // CATEGORY COUNT CALCULATION
   const allCategories = Array.from(new Set(prompts.map(p => p.category || 'Без категории')));
+  const categoryCounts = prompts.reduce((acc, p) => {
+    const cat = p.category || 'Без категории';
+    acc[cat] = (acc[cat] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
 
   const allFilteredPrompts = prompts.filter(prompt => {
     const matchesSearch = 
@@ -611,7 +708,6 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
                 
                 <div className="w-px h-6 bg-slate-700 mx-1 flex-shrink-0"></div>
 
-                {/* Example Management Group */}
                 <button
                   onClick={handleExportToTS}
                   className="p-2 text-slate-400 hover:text-blue-400 hover:bg-slate-700 rounded-md transition-colors relative flex-shrink-0"
@@ -648,6 +744,14 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
                 >
                   <FileText size={18} />
                 </button>
+
+                <button 
+                  onClick={handleExportCSV}
+                  className="p-2 text-slate-400 hover:text-green-400 hover:bg-slate-700 rounded-md transition-colors relative group flex-shrink-0"
+                  title="Скачать как таблицу (.csv)"
+                >
+                  <FileSpreadsheet size={18} />
+                </button>
                 
                 <div className="w-px h-6 bg-slate-700 mx-1 flex-shrink-0"></div>
 
@@ -659,11 +763,9 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
                   <HardDriveDownload size={18} />
                 </button>
 
-                {/* Яндекс.Диск Login Button */}
                 {!isDriveConnected && (
                   <button
                     onClick={() => {
-                      console.log('🔵 Нажата кнопка входа в Яндекс.Диск');
                       setDriveLoading(true);
                       yandexDiskService.signIn();
                     }}
@@ -743,16 +845,18 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
               </div>
               
               <div className="flex gap-2 flex-wrap sm:flex-nowrap">
-                <div className="relative flex-grow sm:flex-grow-0 sm:min-w-[160px]">
+                <div className="relative flex-grow sm:flex-grow-0 sm:min-w-[200px]">
                   <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
                   <select
                     value={selectedCategoryFilter}
                     onChange={(e) => setSelectedCategoryFilter(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm appearance-none focus:outline-none focus:border-indigo-500 cursor-pointer text-slate-300 hover:bg-slate-900"
                   >
-                    <option value="all">Все категории</option>
+                    <option value="all">Все категории ({prompts.length})</option>
                     {allCategories.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
+                      <option key={cat} value={cat}>
+                        {cat} ({categoryCounts[cat] || 0})
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -799,16 +903,17 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
                   <label className="block text-sm font-medium text-slate-400 mb-2">
                     Модель нейросети
                   </label>
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-3 gap-2 sm:gap-3">
                     {['Flux 2', 'Nana Banana', 'Midjourney'].map(model => (
                       <button
                         key={model}
                         onClick={() => setSelectedModel(model)}
-                        className={`py-2 px-3 rounded-lg text-sm font-medium border transition-all ${
+                        className={`py-2 px-2 sm:px-3 rounded-lg text-xs sm:text-sm font-medium border transition-all truncate ${
                           selectedModel === model
                             ? 'bg-indigo-500/20 border-indigo-500 text-indigo-300'
                             : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
                         }`}
+                        title={model}
                       >
                         {model}
                       </button>
@@ -831,18 +936,20 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-400 mb-2">
-                      Категория (Опционально)
+                      Категория (Или своя)
                     </label>
-                    <select
+                    <input
+                      list="category-options"
                       value={inputCategory}
                       onChange={(e) => setInputCategory(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm appearance-none"
-                    >
-                      <option value="">Авто-определение (ИИ)</option>
+                      placeholder="Выберите или введите..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm"
+                    />
+                    <datalist id="category-options">
                       {VALID_CATEGORIES.map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
+                        <option key={cat} value={cat} />
                       ))}
-                    </select>
+                    </datalist>
                   </div>
                 </div>
 
@@ -970,6 +1077,7 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
                           onCategoryUpdate={handleCategoryUpdate}
                           onEdit={setEditingPrompt}
                           onUsageUpdate={handleUsageUpdate}
+                          onAddHistory={handleAddHistory}
                         />
                       ))}
                     </div>
@@ -1003,6 +1111,17 @@ export const EXAMPLE_PROMPTS: Partial<PromptData>[] = ${JSON.stringify(cleanProm
         )}
 
       </main>
+
+      {showScrollTopButton && (
+        <button
+          onClick={scrollToTop}
+          className="fixed bottom-6 right-6 z-50 w-12 h-12 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-lg transition-all duration-300 animate-in fade-in slide-in-from-bottom-5 hover:scale-110 active:scale-100"
+          title="Наверх"
+        >
+          <ChevronUp size={24} />
+        </button>
+      )}
+
     </div>
   );
 }

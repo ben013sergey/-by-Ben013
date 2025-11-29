@@ -85,7 +85,7 @@ export const analyzePrompt = async (promptText: string): Promise<GeminiAnalysisR
   }
 };
 
-export const generateNanoBananaImage = async (prompt: string, referenceImageBase64?: string | null, aspectRatio: AspectRatio = '1:1'): Promise<string> => {
+export const generateNanoBananaImage = async (prompt: string, referenceImageBase64?: string | null, aspectRatio: AspectRatio = '1:1', upscale: boolean = false): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   try {
@@ -109,6 +109,11 @@ export const generateNanoBananaImage = async (prompt: string, referenceImageBase
     // Add text prompt
     parts.push({ text: prompt });
 
+    // Enhance prompt if upscale is requested to encourage detail
+    if (upscale) {
+      parts.push({ text: " high resolution, 4k, highly detailed, sharp focus" });
+    }
+
     let response;
     
     // Attempt 1: Try High-Quality Model
@@ -121,6 +126,9 @@ export const generateNanoBananaImage = async (prompt: string, referenceImageBase
         config: {
           imageConfig: {
             aspectRatio: aspectRatio
+            // Note: Currently 'imageSize' param might not be fully supported in all client versions or regions, 
+            // but requesting the pro model is the key for higher quality.
+            // We rely on the model choice and prompt enhancement for "upscaling".
           }
         }
       });

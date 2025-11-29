@@ -1,7 +1,6 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { PromptData, GenderVariant, VALID_CATEGORIES, AspectRatio } from '../types';
-import { Copy, Check, Trash2, Image as ImageIcon, X, Maximize2, Clock, Edit2, Play, Loader2, Upload, Pencil, Ratio, ZoomIn, ZoomOut, Download, Move, RotateCcw, StickyNote } from 'lucide-react';
+import { PromptData, GenderVariant, VALID_CATEGORIES, AspectRatio, GeneratedImage } from '../types';
+import { Copy, Check, Trash2, Image as ImageIcon, X, Maximize2, Clock, Edit2, Play, Loader2, Upload, Pencil, Ratio, ZoomIn, ZoomOut, Download, Move, RotateCcw, StickyNote, History, ChevronRight, ChevronDown, Scaling } from 'lucide-react';
 import { generateNanoBananaImage } from '../services/geminiService';
 
 interface PromptCardProps {
@@ -11,26 +10,29 @@ interface PromptCardProps {
   onCategoryUpdate: (id: string, newCategory: string) => void;
   onEdit: (data: PromptData) => void;
   onUsageUpdate: (id: string) => void;
+  onAddHistory: (id: string, image: GeneratedImage) => void;
 }
 
-const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCategoryUpdate, onEdit, onUsageUpdate }) => {
+const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCategoryUpdate, onEdit, onUsageUpdate, onAddHistory }) => {
   const [activeVariant, setActiveVariant] = useState<GenderVariant>(GenderVariant.Female);
   const [copied, setCopied] = useState(false);
   const [copyAnim, setCopyAnim] = useState(false);
   
-  // Replaced boolean state with string state to hold the URL of the image to show in modal
   const [activeModalImage, setActiveModalImage] = useState<string | null>(null);
   
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
   // Testing State
-  // Initialize as null to decouple from gallery image
   const [testReferenceImage, setTestReferenceImage] = useState<string | null>(null);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
+  const [upscale, setUpscale] = useState(false);
   
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
+
+  // History Panel State
+  const [showHistory, setShowHistory] = useState(false);
 
   // Zoom & Pan State for Modal
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -49,7 +51,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     activeVariant === GenderVariant.Female ? data.variants.female :
     data.variants.unisex;
 
-  // Reset zoom/pan when modal opens/closes
   useEffect(() => {
     if (!activeModalImage) {
       setZoomLevel(1);
@@ -61,7 +62,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     navigator.clipboard.writeText(currentPromptText);
     setCopied(true);
     setCopyAnim(true);
-    setTimeout(() => setCopyAnim(false), 300); // 300ms pop animation
+    setTimeout(() => setCopyAnim(false), 300);
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -81,15 +82,46 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     setGeneratedImage(null);
 
     try {
-      const result = await generateNanoBananaImage(currentPromptText, testReferenceImage, aspectRatio);
+      const result = await generateNanoBananaImage(currentPromptText, testReferenceImage, aspectRatio, upscale);
       setGeneratedImage(result);
       onUsageUpdate(data.id);
+      
+      const newHistoryItem: GeneratedImage = {
+        id: Date.now().toString(),
+        url: result,
+        timestamp: Date.now(),
+        aspectRatio: aspectRatio
+      };
+      onAddHistory(data.id, newHistoryItem);
+      
+      if (!showHistory && (data.generationHistory?.length || 0) > 0) {
+        setShowHistory(true);
+      }
+
     } catch (e: any) {
       setGenError(e.message || "Ошибка генерации. Проверьте API ключ или лимиты.");
     } finally {
       setIsGenerating(false);
     }
   };
+  
+  const analyzeError = (errorMsg: string): string => {
+      const lowerMsg = errorMsg.toLowerCase();
+      if (lowerMsg.includes('403') || lowerMsg.includes('permission_denied') || lowerMsg.includes('api key')) {
+          return 'Вероятная причина: Проблема с API ключом. Убедитесь, что он действителен и имеет доступ к модели.';
+      }
+      if (lowerMsg.includes('rate limit')) {
+          return 'Вероятная причина: Превышен лимит запросов. Пожалуйста, подождите немного.';
+      }
+      if (lowerMsg.includes('policy') || lowerMsg.includes('safety')) {
+          return 'Вероятная причина: Сработали фильтры безопасности контента. Попробуйте изменить промпт.';
+      }
+      if (lowerMsg.includes('модель вернула текст')) {
+          return 'Вероятная причина: Модель не поняла, что нужно сгенерировать изображение, и ответила текстом. Попробуйте сделать промпт более конкретным.';
+      }
+      return 'Вероятная причина: Общая ошибка сервера или сети. Повторите попытку позже.';
+  };
+
 
   const handleRefUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -114,7 +146,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     }
   };
 
-  // --- Parallax Handlers ---
   const handleCardMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!cardRef.current) return;
     const card = cardRef.current;
@@ -124,7 +155,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
     
-    // Calculate rotation (max 3 degrees for subtlety)
     const rotateXVal = ((y - centerY) / centerY) * -3; 
     const rotateYVal = ((x - centerX) / centerX) * 3;
 
@@ -141,8 +171,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     setRotateX(0);
     setRotateY(0);
   };
-
-  // --- Modal Image Controls ---
 
   const handleZoomIn = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -173,7 +201,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault(); // Prevent default drag behavior
+    e.preventDefault();
     if (zoomLevel > 1) {
       setIsDragging(true);
       dragStartRef.current = { x: e.clientX - panPosition.x, y: e.clientY - panPosition.y };
@@ -196,10 +224,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   };
 
   const handleWheel = (e: React.WheelEvent) => {
-    // Optional: Zoom on wheel
     if (e.ctrlKey || activeModalImage) {
-      // e.stopPropagation();
-      // Simple zoom logic
       if (e.deltaY < 0) {
         setZoomLevel(prev => Math.min(prev + 0.1, 5));
       } else {
@@ -225,7 +250,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
       >
         <div className="p-4 flex flex-col md:flex-row gap-6" style={{ transform: 'translateZ(20px)' }}>
           
-          {/* Left: Index & Main Image (Metadata) */}
           <div className="flex-shrink-0 flex flex-col items-center gap-3 md:w-48">
             <div className="flex items-center justify-between w-full px-1">
                <div className="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-300 font-bold text-sm border border-indigo-500/50">
@@ -248,7 +272,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   />
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-                    {/* Top Left Download Button */}
                     <button 
                       onClick={handleMainImageDownload}
                       className="absolute top-2 left-2 p-1.5 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md z-10" 
@@ -257,7 +280,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                       <Download size={16} />
                     </button>
                     
-                    {/* Center Maximize Button */}
                     <button className="p-2 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md transform scale-90 group-hover:scale-100" title="Открыть">
                       <Maximize2 size={24} />
                     </button>
@@ -271,20 +293,15 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
               )}
             </div>
             
-            {/* Date Display */}
             <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-auto">
               <Clock size={10} />
               <span>{formatDate(data.createdAt)}</span>
             </div>
           </div>
 
-          {/* Right: Content & Testing Area */}
           <div className="flex-grow flex flex-col min-w-0">
-            {/* Header: Category, Title, Delete */}
             <div className="flex justify-between items-start mb-3">
               <div className="flex flex-col relative flex-grow mr-4 min-w-0">
-                
-                {/* Editable Category */}
                 <div 
                   className="group relative inline-flex items-center gap-1 mb-1 cursor-pointer"
                   onClick={() => setShowCategoryDropdown(!showCategoryDropdown)}
@@ -296,7 +313,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                   </span>
                   <Edit2 size={10} className="text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                   
-                  {/* Category Dropdown */}
                   {showCategoryDropdown && (
                     <div className="absolute top-full left-0 mt-1 z-20 bg-slate-800 border border-slate-600 rounded-lg shadow-xl w-64 py-1 animate-in fade-in slide-in-from-top-2 duration-150">
                        <div className="px-3 py-1 text-[10px] text-slate-500 font-bold uppercase tracking-wider border-b border-slate-700/50 mb-1">
@@ -337,7 +353,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                 </button>
                 <button 
                   onClick={(e) => {
-                    e.stopPropagation(); // Prevent any parent clicks
+                    e.stopPropagation();
                     onDelete(data.id);
                   }}
                   className="text-slate-500 hover:text-red-400 hover:bg-slate-700/50 rounded p-1.5 transition-all"
@@ -348,7 +364,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
               </div>
             </div>
 
-            {/* Note Section (If exists) */}
             {data.note && (
               <div className="mb-3 px-3 py-2 bg-yellow-500/5 border border-yellow-500/20 rounded-lg text-xs text-yellow-200/80 flex items-start gap-2">
                 <StickyNote size={14} className="mt-0.5 text-yellow-500/50 flex-shrink-0" />
@@ -356,7 +371,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
               </div>
             )}
 
-            {/* Variant Tabs */}
             <div className="flex flex-wrap gap-2 mb-3">
               {[GenderVariant.Female, GenderVariant.Male, GenderVariant.Unisex].map((variant) => (
                 <button
@@ -374,10 +388,8 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
               ))}
             </div>
 
-            {/* SPLIT CONTAINER: Prompt Text (Left) + Test Area (Right) */}
             <div className="bg-slate-900/50 rounded-lg border border-slate-700/50 flex-grow grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-slate-700/50">
               
-              {/* Left Column: Text */}
               <div className="p-3 lg:col-span-2 flex flex-col relative group">
                 <p className="text-sm text-slate-300 font-mono leading-relaxed break-words whitespace-pre-wrap flex-grow">
                   {currentPromptText}
@@ -403,13 +415,11 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                 </div>
               </div>
 
-              {/* Right Column: Test Lab */}
               <div className="p-3 bg-slate-900/80 flex flex-col gap-3">
                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
                    Тест (Gemini 3 Pro)
                  </div>
                  
-                 {/* Reference Image Uploader */}
                  <div className="relative group/upload">
                    {testReferenceImage ? (
                      <div className="relative w-full h-32 rounded-lg overflow-hidden border border-slate-600 bg-black/50">
@@ -433,42 +443,52 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                    )}
                  </div>
 
-                 {/* Controls: Generate Button + Counter + Aspect Ratio Selector */}
-                 <div className="flex gap-2 items-center">
+                 <div className="flex flex-col gap-2 w-full">
                    <button
                      onClick={handleTestGeneration}
                      disabled={isGenerating}
-                     className={`flex-grow py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                     className={`w-full h-10 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${
                        isGenerating 
                        ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                       : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20'
+                       : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20 active:scale-[0.98]'
                      }`}
                    >
-                     {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} fill="currentColor" />}
-                     {isGenerating ? 'Generating...' : 'Тест'}
+                     {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} fill="currentColor" />}
+                     {isGenerating ? 'Generating...' : 'Тест (Генерация)'}
                    </button>
 
-                   {/* Usage Counter */}
-                   <div className="h-full px-2 bg-slate-800 border border-slate-600 rounded-lg flex items-center justify-center text-[10px] text-slate-400 font-mono min-w-[30px]" title="Количество успешных генераций">
-                     {data.usageCount || 0}
-                   </div>
-                   
-                   <div className="relative w-20 flex-shrink-0">
-                     <Ratio size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                     <select
-                       value={aspectRatio}
-                       onChange={(e) => setAspectRatio(e.target.value as AspectRatio)}
-                       className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-6 pr-1 text-xs text-slate-300 focus:border-indigo-500 outline-none appearance-none cursor-pointer hover:bg-slate-700 py-2"
-                       title="Соотношение сторон"
-                     >
-                       {aspectRatioOptions.map(ratio => (
-                         <option key={ratio} value={ratio}>{ratio}</option>
-                       ))}
-                     </select>
+                   <div className="flex gap-2 h-10">
+                      <div className="h-full px-3 bg-slate-800 border border-slate-600 rounded-lg flex items-center justify-center text-xs text-slate-400 font-mono min-w-[40px]" title="Количество успешных генераций">
+                        {data.usageCount || 0}
+                      </div>
+                      
+                      <div className="relative flex-grow h-full">
+                        <select
+                          value={aspectRatio}
+                          onChange={(e) => setAspectRatio(e.target.value as AspectRatio)}
+                          className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-xs text-slate-300 focus:border-indigo-500 outline-none cursor-pointer hover:bg-slate-700 appearance-none text-center"
+                          title="Соотношение сторон"
+                        >
+                          {aspectRatioOptions.map(ratio => (
+                            <option key={ratio} value={ratio}>{ratio}</option>
+                          ))}
+                        </select>
+                      </div>
+                      
+                      <button
+                          onClick={() => setUpscale(!upscale)}
+                          className={`h-full aspect-square rounded-lg flex items-center justify-center border transition-all ${
+                            upscale 
+                              ? 'bg-indigo-600 border-indigo-500 text-white shadow-indigo-500/20 shadow-md' 
+                              : 'bg-slate-800 border-slate-600 text-slate-400 hover:text-white hover:bg-slate-700'
+                          }`}
+                          title={upscale ? "Upscale включен (Высокое разрешение)" : "Включить Upscale"}
+                       >
+                         <Scaling size={18} />
+                       </button>
                    </div>
                  </div>
 
-                 {/* Loading Indicator */}
                  {isGenerating && (
                    <div className="mt-2 h-40 w-full bg-slate-800/50 rounded-lg border border-slate-700/50 flex flex-col items-center justify-center animate-pulse">
                      <Loader2 size={24} className="text-emerald-500 animate-spin mb-2" />
@@ -476,7 +496,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                    </div>
                  )}
 
-                 {/* Result Area */}
                  {generatedImage && !isGenerating && (
                    <div className="mt-2 animate-in fade-in zoom-in duration-300">
                      <div 
@@ -491,7 +510,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                      <button 
                       onClick={(e) => {
                         e.stopPropagation();
-                        // Download trigger
                         const link = document.createElement('a');
                         link.href = generatedImage;
                         link.download = `generated_${data.id}.png`;
@@ -506,10 +524,46 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                    </div>
                  )}
                  
+                 {data.generationHistory && data.generationHistory.length > 0 && (
+                    <div className="mt-2 border-t border-slate-700/50 pt-2">
+                      <button 
+                        onClick={() => setShowHistory(!showHistory)}
+                        className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-indigo-400 w-full mb-2"
+                      >
+                        <History size={10} />
+                        <span className="flex-grow text-left">История генераций ({data.generationHistory.length})</span>
+                        {showHistory ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                      </button>
+                      
+                      {showHistory && (
+                        <div className="grid grid-cols-4 gap-2 animate-in slide-in-from-top-1">
+                          {data.generationHistory.map((historyItem) => (
+                            <div 
+                              key={historyItem.id} 
+                              className="relative aspect-square rounded overflow-hidden border border-slate-700 cursor-pointer hover:border-indigo-500 transition-colors"
+                              onClick={() => setActiveModalImage(historyItem.url)}
+                              title={new Date(historyItem.timestamp).toLocaleString()}
+                            >
+                              <img src={historyItem.url} alt="history" className="w-full h-full object-cover" />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                 )}
+                 
                  {genError && (
-                   <div className="text-[10px] text-red-400 bg-red-500/10 p-2 rounded border border-red-500/20 break-words">
-                     {genError}
-                   </div>
+                    <div className="mt-2 text-xs text-red-400 bg-red-500/10 p-3 rounded-lg border border-red-500/20 space-y-2">
+                        <p className="font-bold">Ошибка генерации</p>
+                        <p className="font-mono text-[10px] break-words">{genError}</p>
+                        <p className="text-red-400/80 text-[10px] border-t border-red-500/20 pt-2 mt-2">{analyzeError(genError)}</p>
+                        <button
+                            onClick={() => navigator.clipboard.writeText(genError)}
+                            className="w-full text-center text-[10px] text-red-400/80 mt-1 hover:underline"
+                        >
+                            Копировать ошибку
+                        </button>
+                    </div>
                  )}
               </div>
 
@@ -518,13 +572,11 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
         </div>
       </div>
 
-      {/* Advanced Full Screen Image Modal */}
       {activeModalImage && (
         <div 
           className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center overflow-hidden animate-in fade-in duration-200"
           onWheel={handleWheel}
         >
-          {/* Toolbar */}
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[110] flex items-center gap-2 bg-slate-800/90 border border-slate-700 rounded-full px-4 py-2 shadow-2xl backdrop-blur-md">
              <button onClick={handleZoomOut} className="p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded-full transition-colors" title="Уменьшить">
                <ZoomOut size={20} />
@@ -550,7 +602,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
              </button>
           </div>
 
-          {/* Image Container */}
           <div 
             className={`w-full h-full flex items-center justify-center ${zoomLevel > 1 ? 'cursor-move' : 'cursor-default'}`}
             onMouseDown={handleMouseDown}

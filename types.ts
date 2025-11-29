@@ -7,6 +7,13 @@ export enum GenderVariant {
 
 export type AspectRatio = '1:1' | '2:3' | '3:2' | '3:4' | '4:3' | '9:16' | '16:9' | '21:9';
 
+export interface GeneratedImage {
+  id: string;
+  url: string;
+  timestamp: number;
+  aspectRatio: AspectRatio;
+}
+
 export interface PromptData {
   id: string;
   originalPrompt: string;
@@ -21,6 +28,7 @@ export interface PromptData {
   imageBase64: string | null;
   note?: string; // Optional user note
   usageCount?: number; // Counter for successful generations
+  generationHistory?: GeneratedImage[]; // History of generated images
   createdAt: number;
 }
 
