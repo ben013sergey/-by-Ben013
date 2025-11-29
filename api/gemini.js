@@ -29,8 +29,8 @@ export default async function handler(req, res) {
     Структура:
     {
       "shortTitle": "Название (RU)",
-      "category": "Категория",
-      "variants": {
+      "category": "Категория (RU)",
+      "variants": {"Портрет людей/персонажей", "Предметы и Дизайн продуктов", "Фоны и Окружение", "Стили и улучшения", "Другое"}
         "male": "Промпт (EN)",
         "female": "Промпт (EN)",
         "unisex": "Промпт (EN)"
