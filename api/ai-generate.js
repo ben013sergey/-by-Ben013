@@ -15,9 +15,8 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "API Key не найден на сервере" });
   }
 
-  // 2. ИСПОЛЬЗУЕМ GEMINI 1.5 FLASH (Самая актуальная)
-  // Обращаемся напрямую к Google, минуя любые библиотеки
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+  // --- ИСПРАВЛЕНИЕ: ИСПОЛЬЗУЕМ GEMINI PRO (Самая стабильная) ---
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`;
 
   const systemInstruction = `
   Ты эксперт по промптам. Твоя задача: вернуть валидный JSON.
