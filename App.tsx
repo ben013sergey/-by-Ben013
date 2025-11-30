@@ -629,20 +629,37 @@ function App() {
                   <CloudDownload size={18} />
                 </button>
 
-                {/* 2. Сохранение (С логикой Админ/Гость) */}
+                {/* 2. Сохранение (Админ по ID или по Паролю) */}
                 {(() => {
-                  const user = window.Telegram?.WebApp?.initDataUnsafe?.user;
-                  const userId = user?.id;
-                  const username = user?.username || user?.first_name || "user";
+                  // 1. Получаем данные из Телеграма
+                  const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+                  const userId = tgUser?.id;
+                  let username = tgUser?.username || tgUser?.first_name || "Guest";
                   
-                  // Проверка на админа
-                  const isAdmin = userId === ADMIN_ID;
+                  // 2. Проверяем URL на наличие секретного слова
+                  const urlParams = new URLSearchParams(window.location.search);
+                  const urlPass = urlParams.get('uid');
+
+                  // --- ЛОГИКА ПРАВ ДОСТУПА ---
+                  let isAdmin = false;
+
+                  // Способ А: Совпал ID в Телеграме
+                  if (userId === ADMIN_ID) {
+                    isAdmin = true;
+                  }
+                  
+                  // Способ Б: Введено кодовое слово в браузере (?uid=ben013)
+                  if (urlPass === 'ben013') {
+                    isAdmin = true;
+                    username = "Admin (Browser)";
+                  }
+                  // ---------------------------
 
                   if (isAdmin) {
                     return (
                       <button 
                         onClick={async () => {
-                          if(!confirm("⚠️ Вы АДМИН.\nЭто действие ПЕРЕЗАПИШЕТ основную базу!\nПродолжить?")) return;
+                          if(!confirm(`⚠️ Вы АДМИН (${username}).\nЭто действие ПЕРЕЗАПИШЕТ основную базу!\nПродолжить?`)) return;
                           const toastId = showToast("Сохранение (Master)...", "success");
                           try {
                              await saveToYandexDisk(prompts); 
