@@ -22,12 +22,12 @@ export default async function handler(req, res) {
   Tasks:
   1. Categorize into exactly one of: 'Портрет людей/персонажей', 'Предметы и Дизайн продуктов', 'Фоны и Окружение', 'Стили и улучшения', 'Промпты с фото', 'Другое'.
   2. Create a short title in Russian (3-6 words).
-  3. Create 6 variations of the prompt text:
-     - maleEn, femaleEn, unisexEn: For Image Generation (In English).
-     - maleRu, femaleRu, unisexRu: For User Reading (In Russian).
-     Preserving the structure, context and atmosphere of the original promt. 
+  3. Create 6 variations of the prompt text. Preserving the structure, context and atmosphere of the original promt. 
      When changing the gender (male, female, unisex) description of a person, his clothes, accessories, 
-     try to choose the appropriate one for the one described in the original promt text, but for the desired gender
+     try to choose the appropriate one for the one described in the original promt text, but for the desired gender:
+     - maleEn, femaleEn, unisexEn: For Image Generation (In English). 
+     - maleRu, femaleRu, unisexRu: For User Reading (In Russian).
+     
 
 
   
