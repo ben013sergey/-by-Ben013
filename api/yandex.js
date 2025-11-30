@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  // Разрешаем запросы
+  // Настройка доступов (CORS)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -9,28 +9,44 @@ export default async function handler(req, res) {
   }
 
   const TOKEN = process.env.YANDEX_DISK_TOKEN;
-  if (!TOKEN) return res.status(500).json({ error: "Нет токена Яндекса" });
+  if (!TOKEN) {
+    return res.status(500).json({ error: "Нет токена Яндекса в настройках Vercel" });
+  }
 
-  const FILE_PATH = "app:/database_prompts.json"; // Файл будет лежать в папке Приложения
+  // Путь к файлу внутри папки приложения
+  const FILE_PATH = "app:/database_prompts.json";
 
   try {
     // --- 1. СОХРАНЕНИЕ (POST) ---
     if (req.method === 'POST') {
       const { content } = req.body;
       
-      // А. Получаем ссылку для загрузки
+      // Превращаем данные в красивый текст JSON
+      // Важно: если content уже строка, не стрингифаем её второй раз
+      const fileContent = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+
+      // А. Получаем ссылку для загрузки (Get Upload URL)
       const uploadUrlRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/upload?path=${FILE_PATH}&overwrite=true`, {
         headers: { 'Authorization': `OAuth ${TOKEN}` }
       });
       const uploadUrlData = await uploadUrlRes.json();
       
-      if (!uploadUrlData.href) throw new Error("Не удалось получить ссылку для загрузки");
+      // Если ошибка на этапе получения ссылки (например, папка не создалась или места нет)
+      if (!uploadUrlData.href) {
+         console.error("Yandex Upload URL Error:", uploadUrlData);
+         throw new Error(uploadUrlData.message || "Не удалось получить ссылку для загрузки");
+      }
 
-      // Б. Загружаем файл по этой ссылке
-      await fetch(uploadUrlData.href, {
+      // Б. Загружаем файл по полученной ссылке (PUT)
+      const uploadRes = await fetch(uploadUrlData.href, {
         method: 'PUT',
-        body: JSON.stringify(content)
+        body: fileContent
       });
+
+      // Проверяем, что файл реально записался
+      if (!uploadRes.ok) {
+         throw new Error("Ошибка при записи файла: " + uploadRes.statusText);
+      }
 
       return res.status(200).json({ status: "saved" });
     }
@@ -44,7 +60,11 @@ export default async function handler(req, res) {
       const downloadUrlData = await downloadUrlRes.json();
 
       if (downloadUrlData.error === "DiskNotFoundError") {
-        return res.status(404).json({ error: "Файл еще не создан" });
+        return res.status(404).json({ error: "Файл еще не создан (База пуста)" });
+      }
+      
+      if (!downloadUrlData.href) {
+         throw new Error(downloadUrlData.message || "Ошибка получения ссылки на скачивание");
       }
 
       // Б. Скачиваем сам файл
