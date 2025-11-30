@@ -3,7 +3,7 @@ import { PromptData, VALID_CATEGORIES, AspectRatio, GeneratedImage } from '../ty
 import { Copy, Check, Trash2, Image as ImageIcon, X, Maximize2, Clock, Edit2, Play, Loader2, Upload, Pencil, ZoomIn, ZoomOut, Download, RotateCcw, StickyNote, History, ChevronRight, ChevronDown, Scaling, Languages } from 'lucide-react';
 import { generateNanoBananaImage } from '../services/geminiService';
 
-// Определяем enum локально, чтобы не зависеть от старого types.ts, если там что-то не обновилось
+// Локальный Enum для безопасности
 enum GenderVariant {
   Male = 'Male',
   Female = 'Female',
@@ -22,10 +22,9 @@ interface PromptCardProps {
 
 const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCategoryUpdate, onEdit, onUsageUpdate, onAddHistory }) => {
   const [activeVariant, setActiveVariant] = useState<GenderVariant>(GenderVariant.Female);
-  const [showRussian, setShowRussian] = useState(false); // НОВОЕ: Переключатель языка
+  const [showRussian, setShowRussian] = useState(false); // Переключатель языка по умолчанию выкл (English)
 
   const [copied, setCopied] = useState(false);
-  const [copyAnim, setCopyAnim] = useState(false);
   
   const [activeModalImage, setActiveModalImage] = useState<string | null>(null);
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
@@ -54,8 +53,9 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const [rotateX, setRotateX] = useState(0);
   const [rotateY, setRotateY] = useState(0);
 
-  // ЛОГИКА ВЫБОРА ТЕКСТА (С учетом языка)
+  // --- ЛОГИКА ВЫБОРА ТЕКСТА ---
   const getCurrentText = () => {
+    // Пытаемся найти новый формат (Ru/En). Если его нет - берем старый (variants.female)
     if (activeVariant === GenderVariant.Female) {
         return showRussian ? (data.variants.femaleRu || data.variants.female) : (data.variants.femaleEn || data.variants.female);
     }
@@ -66,7 +66,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     return showRussian ? (data.variants.unisexRu || data.variants.unisex) : (data.variants.unisexEn || data.variants.unisex);
   };
 
-  // Текст для генерации (Всегда английский)
+  // Текст для генерации (Всегда английский, так лучше для нейросети)
   const getGenerationText = () => {
      if (activeVariant === GenderVariant.Female) return data.variants.femaleEn || data.variants.female;
      if (activeVariant === GenderVariant.Male) return data.variants.maleEn || data.variants.male;
@@ -81,10 +81,8 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   }, [activeModalImage]);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(getCurrentText());
+    navigator.clipboard.writeText(getCurrentText() || "");
     setCopied(true);
-    setCopyAnim(true);
-    setTimeout(() => setCopyAnim(false), 300);
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -100,14 +98,17 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     setGeneratedImage(null);
 
     try {
-      // Используем английский текст для генерации
-      const result = await generateNanoBananaImage(getGenerationText(), testReferenceImage, aspectRatio, upscale);
-      setGeneratedImage(result);
+      const promptToUse = getGenerationText();
+      if (!promptToUse) throw new Error("Промпт пустой");
+
+      const result = await generateNanoBananaImage(promptToUse); // Вызов сервиса
+      setGeneratedImage(result.url); // В сервисе мы вернули объект {url, ...}, берем url
+      
       onUsageUpdate(data.id);
       
       const newHistoryItem: GeneratedImage = {
         id: Date.now().toString(),
-        url: result,
+        url: result.url,
         timestamp: Date.now(),
         aspectRatio: aspectRatio
       };
@@ -124,7 +125,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     }
   };
   
-  // ... Остальные обработчики (RefUpload, Download, Zoom и т.д.) оставляем как были ...
   const handleRefUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -309,7 +309,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                 
                 {/* --- КНОПКИ ВНИЗУ ТЕКСТА --- */}
                 <div className="flex justify-end gap-2 mt-2">
-                  {/* Кнопка перевода */}
                   <button
                     onClick={() => setShowRussian(!showRussian)}
                     className={`p-2 rounded-md transition-all text-xs flex items-center gap-1 ${
