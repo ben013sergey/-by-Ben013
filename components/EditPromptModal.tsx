@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect } from 'react';
-import { PromptData, GenderVariant, VALID_CATEGORIES } from '../types';
-import { X, Save, Upload, Image as ImageIcon, Trash2 } from 'lucide-react';
+import { PromptData, GenderVariant, VALID_CATEGORIES, PromptVariants } from '../types';
+import { X, Save, Upload, Image as ImageIcon, Trash2, Languages } from 'lucide-react';
 
 interface EditPromptModalProps {
   isOpen: boolean;
@@ -31,14 +30,28 @@ const EditPromptModal: React.FC<EditPromptModalProps> = ({ isOpen, onClose, onSa
     }
   };
 
-  const handleVariantChange = (text: string) => {
+  // Универсальная функция для обновления текста (En или Ru)
+  const handleVariantTextChange = (lang: 'En' | 'Ru', text: string) => {
+    const prefix = activeVariant.toLowerCase(); // male, female, unisex
+    const key = `${prefix}${lang}` as keyof PromptVariants; // maleEn, maleRu ...
+
     setFormData(prev => ({
       ...prev,
       variants: {
         ...prev.variants,
-        [activeVariant.toLowerCase()]: text
+        [key]: text
       }
     }));
+  };
+
+  // Хелпер для получения текущего значения (с поддержкой старых данных)
+  const getVariantValue = (lang: 'En' | 'Ru') => {
+    const prefix = activeVariant.toLowerCase();
+    const key = `${prefix}${lang}` as keyof PromptVariants;
+    const oldKey = prefix as keyof PromptVariants; // male, female...
+
+    // Если есть новое поле (maleEn) - берем его. Если нет - берем старое (male).
+    return (formData.variants[key] || formData.variants[oldKey] || '') as string;
   };
 
   return (
@@ -95,7 +108,7 @@ const EditPromptModal: React.FC<EditPromptModalProps> = ({ isOpen, onClose, onSa
             </select>
           </div>
 
-          {/* Note Section (ADDED) */}
+          {/* Note Section */}
           <div>
              <label className="block text-xs font-medium text-slate-400 mb-1">Примечание</label>
              <textarea
@@ -141,7 +154,7 @@ const EditPromptModal: React.FC<EditPromptModalProps> = ({ isOpen, onClose, onSa
             </div>
           </div>
 
-          {/* Prompt Variants Editor */}
+          {/* Prompt Variants Editor (NEW 6 FIELDS) */}
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-2">Текст промпта (по вариантам)</label>
             
@@ -163,20 +176,33 @@ const EditPromptModal: React.FC<EditPromptModalProps> = ({ isOpen, onClose, onSa
               ))}
             </div>
 
-            {/* Textarea */}
-            <textarea 
-              value={
-                activeVariant === GenderVariant.Male ? formData.variants.male :
-                activeVariant === GenderVariant.Female ? formData.variants.female :
-                formData.variants.unisex
-              }
-              onChange={(e) => handleVariantChange(e.target.value)}
-              className="w-full h-48 bg-slate-950 border border-slate-700 rounded-b-lg rounded-tr-lg p-3 text-sm text-slate-200 font-mono focus:border-indigo-500 outline-none resize-none"
-              placeholder={`Введите текст промпта для варианта "${activeVariant}"...`}
-            />
-             <p className="text-[10px] text-slate-500 mt-1">
-               * Редактирование текста для выбранного пола/варианта. Переключайте вкладки, чтобы изменить остальные.
-             </p>
+            <div className="grid grid-cols-1 gap-4 bg-slate-950 border border-slate-700 rounded-b-lg rounded-tr-lg p-3">
+                {/* English Field */}
+                <div>
+                    <label className="text-[10px] text-indigo-400 uppercase font-bold mb-1 block flex items-center gap-1">
+                        English <span className="text-slate-500 font-normal">(Для генерации)</span>
+                    </label>
+                    <textarea 
+                      value={getVariantValue('En')}
+                      onChange={(e) => handleVariantTextChange('En', e.target.value)}
+                      className="w-full h-32 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-slate-200 font-mono focus:border-indigo-500 outline-none resize-none"
+                      placeholder="Prompt in English..."
+                    />
+                </div>
+
+                {/* Russian Field */}
+                <div>
+                    <label className="text-[10px] text-blue-400 uppercase font-bold mb-1 block flex items-center gap-1">
+                        Русский <span className="text-slate-500 font-normal">(Для чтения/перевода)</span>
+                    </label>
+                    <textarea 
+                      value={getVariantValue('Ru')}
+                      onChange={(e) => handleVariantTextChange('Ru', e.target.value)}
+                      className="w-full h-32 bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-slate-200 font-mono focus:border-indigo-500 outline-none resize-none"
+                      placeholder="Описание на русском..."
+                    />
+                </div>
+            </div>
           </div>
 
         </div>
