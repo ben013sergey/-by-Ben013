@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  // Настройка CORS (чтобы сайт мог обращаться к серверу)
+  // Заголовки для доступа
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -15,11 +15,10 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Нет API ключа" });
   }
 
-  // === ИСПРАВЛЕНИЕ ЗДЕСЬ ===
-  // Используем классическую модель "gemini-pro". Она работает всегда.
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`;
+  // --- ЧИСТЫЙ ЗАПРОС (БЕЗ БИБЛИОТЕК) ---
+  // Используем Gemini 1.5 Flash (она сейчас основная бесплатная)
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
 
-  // Инструкция
   const systemInstruction = `
   Ты эксперт по промптам. Твоя задача: вернуть валидный JSON.
   Структура:
@@ -36,22 +35,19 @@ export default async function handler(req, res) {
     }
   }
   Категории: 'Портрет людей/персонажей', 'Предметы и Дизайн продуктов', 'Фоны и Окружение', 'Стили и улучшения', 'Другое'.
-  Верни ТОЛЬКО JSON. Без markdown.
+  Верни ТОЛЬКО JSON.
   `;
-
-  // Формируем тело запроса
-  // Для gemini-pro лучше включать инструкцию прямо в текст prompt, так надежнее
-  const fullPrompt = `${systemInstruction}\n\nЗАПРОС ПОЛЬЗОВАТЕЛЯ: ${prompt}`;
 
   const requestBody = {
     contents: [{
       parts: [{
-        text: fullPrompt
+        text: `${systemInstruction}\n\nЗАПРОС ПОЛЬЗОВАТЕЛЯ: ${prompt}`
       }]
     }]
   };
 
   try {
+    console.log("Отправляем запрос в Google...");
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -60,20 +56,20 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
+    // Если Google вернул ошибку, выводим её текст
     if (!response.ok) {
+      console.error("Google Error:", JSON.stringify(data));
       throw new Error(data.error?.message || "Ошибка Google API");
     }
 
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    
-    if (!text) throw new Error("Пустой ответ от нейросети");
+    if (!text) throw new Error("Пустой ответ");
 
     const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    
     return res.status(200).json(JSON.parse(cleanJson));
 
   } catch (error) {
-    console.error("API Error:", error);
+    console.error("Server Error:", error);
     return res.status(500).json({ error: error.message });
   }
 }
