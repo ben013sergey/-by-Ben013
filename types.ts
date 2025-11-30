@@ -1,4 +1,3 @@
-
 export enum GenderVariant {
   Male = 'Male',
   Female = 'Female',
@@ -14,32 +13,44 @@ export interface GeneratedImage {
   aspectRatio: AspectRatio;
 }
 
+// 1. Создаем специальный интерфейс для вариантов, чтобы поддерживать и старое, и новое
+export interface PromptVariants {
+  // Новые поля (могут отсутствовать в старых записях, поэтому ?)
+  maleEn?: string;
+  maleRu?: string;
+  femaleEn?: string;
+  femaleRu?: string;
+  unisexEn?: string;
+  unisexRu?: string;
+
+  // Старые поля (оставляем для совместимости с вашей текущей базой)
+  male?: string;
+  female?: string;
+  unisex?: string;
+}
+
 export interface PromptData {
   id: string;
   originalPrompt: string;
   model: string;
   category: string;
   shortTitle: string;
-  variants: {
-    male: string;
-    female: string;
-    unisex: string;
-  };
+  
+  // 2. Используем обновленную структуру вариантов
+  variants: PromptVariants;
+  
   imageBase64: string | null;
-  note?: string; // Optional user note
-  usageCount?: number; // Counter for successful generations
-  generationHistory?: GeneratedImage[]; // History of generated images
+  note?: string; 
+  usageCount?: number; 
+  generationHistory?: GeneratedImage[]; 
   createdAt: number;
 }
 
 export interface GeminiAnalysisResult {
   category: string;
   shortTitle: string;
-  variants: {
-    male: string;
-    female: string;
-    unisex: string;
-  };
+  // 3. Тут тоже обновляем
+  variants: PromptVariants;
 }
 
 export const VALID_CATEGORIES = [
