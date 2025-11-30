@@ -1,7 +1,8 @@
-// 1. АНАЛИЗ ТЕКСТА (Через DeepSeek)
+// 1. АНАЛИЗ ТЕКСТА (Через OpenRouter / Qwen)
 export const analyzePrompt = async (promptText: string) => {
   try {
-    const response = await fetch('/api/deepseek', {
+    // Шлем запрос на наш новый файл openrouter.js
+    const response = await fetch('/api/openrouter', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: promptText }),
@@ -18,18 +19,14 @@ export const analyzePrompt = async (promptText: string) => {
   } catch (error) {
     console.error("AI Analysis Error:", error);
     
-    // ВАЖНО: Возвращаем полную структуру при ошибке
-    // Чтобы кнопки RU/EN не ломались, дублируем текст во все поля
+    // Заглушка при ошибке (чтобы интерфейс не падал)
     return {
       shortTitle: "Без обработки",
       category: "Другое",
       variants: {
-        maleEn: promptText,
-        maleRu: promptText,
-        femaleEn: promptText,
-        femaleRu: promptText,
-        unisexEn: promptText,
-        unisexRu: promptText
+        maleEn: promptText, maleRu: promptText,
+        femaleEn: promptText, femaleRu: promptText,
+        unisexEn: promptText, unisexRu: promptText
       }
     };
   }
@@ -48,7 +45,7 @@ const getDimensions = (ratio: string) => {
   }
 };
 
-// 2. ГЕНЕРАЦИЯ КАРТИНКИ (Pollinations Flux - БЕЗ лишней магии)
+// 2. ГЕНЕРАЦИЯ КАРТИНКИ (Pollinations Flux)
 export const generateNanoBananaImage = async (
   prompt: string, 
   refImage?: string | null, 
@@ -56,19 +53,12 @@ export const generateNanoBananaImage = async (
   upscale: boolean = false
 ) => {
   try {
-    // 1. Считаем точные размеры
     const { w, h } = getDimensions(aspectRatio);
-    
-    // 2. Случайное зерно
     const seed = Math.floor(Math.random() * 100000);
-    
-    // 3. Формируем промпт (Только то, что пришло из карточки, без "best quality")
     const encodedPrompt = encodeURIComponent(prompt);
 
-    // 4. Формируем URL
     let imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux`;
 
-    // Задержка для UI
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     return {
