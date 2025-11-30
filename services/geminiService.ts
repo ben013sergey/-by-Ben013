@@ -1,9 +1,7 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-// 1. АНАЛИЗ ТЕКСТА (Через сервер Vercel)
+// 1. АНАЛИЗ ТЕКСТА (Через DeepSeek)
 export const analyzePrompt = async (promptText: string) => {
   try {
-    const response = await fetch('/api/ai-generate', {
+    const response = await fetch('/api/deepseek', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: promptText }),
@@ -18,10 +16,10 @@ export const analyzePrompt = async (promptText: string) => {
     return data;
 
   } catch (error) {
-    console.error("Gemini Error:", error);
+    console.error("AI Analysis Error:", error);
     
-    // ВАЖНО: Возвращаем правильную структуру при ошибке
-    // Чтобы кнопки перевода и генерации не ломались
+    // ВАЖНО: Возвращаем полную структуру при ошибке
+    // Чтобы кнопки RU/EN не ломались, дублируем текст во все поля
     return {
       shortTitle: "Без обработки",
       category: "Другое",
@@ -37,14 +35,40 @@ export const analyzePrompt = async (promptText: string) => {
   }
 };
 
-// 2. ГЕНЕРАЦИЯ КАРТИНКИ (Pollinations)
-export const generateNanoBananaImage = async (prompt: string) => {
-  try {
-    const seed = Math.floor(Math.random() * 10000);
-    const encodedPrompt = encodeURIComponent(prompt);
-    // Добавляем model=flux для качества
-    const imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&width=1024&height=1024&nologo=true&model=flux`;
+// Функция расчета размеров
+const getDimensions = (ratio: string) => {
+  switch (ratio) {
+    case '16:9': return { w: 1280, h: 720 };
+    case '9:16': return { w: 720, h: 1280 };
+    case '4:3':  return { w: 1024, h: 768 };
+    case '3:4':  return { w: 768, h: 1024 };
+    case '21:9': return { w: 1280, h: 544 };
+    case '1:1': 
+    default:     return { w: 1024, h: 1024 };
+  }
+};
 
+// 2. ГЕНЕРАЦИЯ КАРТИНКИ (Pollinations Flux - БЕЗ лишней магии)
+export const generateNanoBananaImage = async (
+  prompt: string, 
+  refImage?: string | null, 
+  aspectRatio: string = '1:1', 
+  upscale: boolean = false
+) => {
+  try {
+    // 1. Считаем точные размеры
+    const { w, h } = getDimensions(aspectRatio);
+    
+    // 2. Случайное зерно
+    const seed = Math.floor(Math.random() * 100000);
+    
+    // 3. Формируем промпт (Только то, что пришло из карточки, без "best quality")
+    const encodedPrompt = encodeURIComponent(prompt);
+
+    // 4. Формируем URL
+    let imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux`;
+
+    // Задержка для UI
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     return {
