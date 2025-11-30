@@ -14,30 +14,32 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Нет ключа DeepSeek" });
   }
 
+  // ИНСТРУКЦИЯ: 6 вариантов + Сохранение лица + Категории
   const systemInstruction = `
-  You are a helpful assistant for prompt engineering.
-  Analyze the user's image generation prompt.
+  You are an expert prompt engineer. Analyze the user's prompt.
   
   Tasks:
-  1. Create a short title in Russian (3-6 words).
-  2. Categorize it into exactly one of: 'Портрет людей/персонажей', 'Предметы и Дизайн продуктов', 'Фоны и Окружение', 'Стили и улучшения', 'Промпты с фото', 'Другое'.
-  3. Create 3 variations (Male, Female, Unisex) in English.
+  1. Detect context and gender.
+  2. Create a short title in Russian (3-6 words).
+  3. Categorize into exactly one of: 'Портрет людей/персонажей', 'Предметы и Дизайн продуктов', 'Фоны и Окружение', 'Стили и улучшения', 'Промпты с фото', 'Другое'.
+  4. Generate 6 variations:
+     - maleEn, femaleEn, unisexEn: For Image Generation (In English).
+     - maleRu, femaleRu, unisexRu: For User Reading (In Russian).
   
-  CRITICAL RULES:
-  - Do NOT rewrite the prompt context drastically. Keep the original meaning and structure. Just adapt the gender.
-  - If the prompt involves a person/human/character, you MUST append exactly this string at the end of the description:
-    "(сохраняй лицо человека на 100% точным по сравнению с загруженным изображением),(Не меняй черты лица)"
+  CRITICAL RULE FOR FACE PRESERVATION:
+  If the prompt involves a person/human/character, you MUST append exactly this string to the English variants (*En):
+  "(сохраняй лицо человека на 100% точным по сравнению с загруженным изображением),(Не меняй черты лица)"
   
   RESPONSE FORMAT (JSON ONLY):
   {
     "category": "String",
     "shortTitle": "String",
     "variants": {
-      "maleEn": "Prompt adapted for Male (English)",
+      "maleEn": "Prompt for male (English) + Face Tag if needed",
       "maleRu": "Промпт для парня (Russian translation)",
-      "femaleEn": "Prompt adapted for Female (English)",
+      "femaleEn": "Prompt for female (English) + Face Tag if needed",
       "femaleRu": "Промпт для девушки (Russian translation)",
-      "unisexEn": "Prompt adapted for Unisex (English)",
+      "unisexEn": "Prompt for unisex (English) + Face Tag if needed",
       "unisexRu": "Общий промпт (Russian translation)"
     }
   }
@@ -56,7 +58,7 @@ export default async function handler(req, res) {
           { role: "system", content: systemInstruction },
           { role: "user", content: prompt }
         ],
-        response_format: { type: "json_object" }, // DeepSeek умеет гарантировать JSON
+        response_format: { type: "json_object" },
         temperature: 0.7
       })
     });
