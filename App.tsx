@@ -31,6 +31,10 @@ const STORAGE_KEY = 'promptvault_data_v1';
 const DRAFT_KEY = 'promptvault_create_draft';
 const ITEMS_PER_PAGE = 20;
 
+// === ВАШ ID (Администратор) ===
+const ADMIN_ID = 439014866; 
+// ==============================
+
 // Simple Toast Component
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => (
   <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border animate-in slide-in-from-bottom-5 fade-in duration-300 ${
@@ -48,9 +52,7 @@ const generateId = () => {
   }
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
 };
-// === ВАШ ID (ЗАМЕНИТЕ ЦИФРЫ НА СВОИ) ===
-const ADMIN_ID = 439014866; 
-// ======================================
+
 function App() {
   const [prompts, setPrompts] = useState<PromptData[]>([]);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
@@ -353,8 +355,6 @@ function App() {
       const finalTitle = inputTitle.trim() ? inputTitle.trim() : "Без названия";
       const finalCategory = inputCategory ? inputCategory : "Другое";
 
-      // ДУБЛИРУЕМ ТЕКСТ ВО ВСЕ ВАРИАНТЫ
-      // Чтобы не было пустых полей при ручном вводе
       const text = inputPrompt;
 
       const newEntry: PromptData = {
@@ -367,7 +367,6 @@ function App() {
             maleEn: text, maleRu: text,
             femaleEn: text, femaleRu: text,
             unisexEn: text, unisexRu: text,
-            // Для совместимости со старым кодом (на всякий случай)
             male: text, female: text, unisex: text 
         },
         imageBase64: uploadedImage,
@@ -452,7 +451,6 @@ function App() {
     setPrompts(prev => prev.map(p => {
       if (p.id === id) {
         const prevHistory = p.generationHistory || [];
-        // Limit history to 5 items
         return { ...p, generationHistory: [image, ...prevHistory].slice(0, 5) };
       }
       return p;
@@ -472,7 +470,6 @@ function App() {
     showToast("Фильтры сброшены");
   };
 
-  // CATEGORY COUNT CALCULATION
   const allCategories = Array.from(new Set(prompts.map(p => p.category || 'Без категории')));
   const categoryCounts = prompts.reduce((acc, p) => {
     const cat = p.category || 'Без категории';
@@ -606,8 +603,9 @@ function App() {
                   <HardDriveDownload size={18} />
                 </button>
 
-                {/* --- НОВЫЕ КНОПКИ ЯНДЕКС ДИСК --- */}
+                {/* --- КНОПКИ ЯНДЕКС ДИСК --- */}
                 
+                {/* 1. Загрузка (Доступна всем) */}
                 <button 
                   onClick={async () => {
                     if(!confirm("Заменить текущую базу версией с Яндекс.Диска?")) return;
@@ -631,23 +629,60 @@ function App() {
                   <CloudDownload size={18} />
                 </button>
 
-                <button 
-                  onClick={async () => {
-                    const toastId = showToast("Сохранение на Яндекс.Диск...", "success");
-                    try {
-                       await saveToYandexDisk(prompts);
-                       setLastSaved(new Date());
-                       showToast("✅ Сохранено в облако!", "success");
-                    } catch(e) {
-                       showToast("Ошибка сохранения", "error");
-                    }
-                  }}
-                  className="p-2 flex items-center justify-center text-white bg-red-600 hover:bg-red-500 rounded-md transition-all flex-shrink-0 active:scale-95 shadow-md"
-                  title="Сохранить на Яндекс.Диск"
-                >
-                  <Cloud size={18} />
-                  <span className="ml-1 text-[10px] font-bold leading-none">Ya</span>
-                </button>
+                {/* 2. Сохранение (С логикой Админ/Гость) */}
+                {(() => {
+                  const user = window.Telegram?.WebApp?.initDataUnsafe?.user;
+                  const userId = user?.id;
+                  const username = user?.username || user?.first_name || "user";
+                  
+                  // Проверка на админа
+                  const isAdmin = userId === ADMIN_ID;
+
+                  if (isAdmin) {
+                    return (
+                      <button 
+                        onClick={async () => {
+                          if(!confirm("⚠️ Вы АДМИН.\nЭто действие ПЕРЕЗАПИШЕТ основную базу!\nПродолжить?")) return;
+                          const toastId = showToast("Сохранение (Master)...", "success");
+                          try {
+                             await saveToYandexDisk(prompts); 
+                             setLastSaved(new Date());
+                             showToast("✅ Основная база обновлена!", "success");
+                          } catch(e) {
+                             showToast("Ошибка сохранения", "error");
+                          }
+                        }}
+                        className="p-2 flex items-center gap-1 text-white bg-red-600 hover:bg-red-500 rounded-md transition-all flex-shrink-0 active:scale-95 shadow-md"
+                        title="АДМИН: Перезаписать базу"
+                      >
+                        <Cloud size={18} />
+                        <span className="text-[10px] font-bold">MAIN</span>
+                      </button>
+                    );
+                  } else {
+                    return (
+                      <button 
+                        onClick={async () => {
+                          const dateStr = new Date().toISOString().slice(0,10);
+                          const safeName = `suggestion_${username}_${dateStr}.json`;
+                          
+                          const toastId = showToast(`Сохранение копии (${username})...`, "success");
+                          try {
+                             await saveToYandexDisk(prompts, safeName);
+                             showToast(`✅ Копия сохранена: ${safeName}`, "success");
+                          } catch(e) {
+                             showToast("Ошибка сохранения", "error");
+                          }
+                        }}
+                        className="p-2 flex items-center gap-1 text-slate-900 bg-yellow-400 hover:bg-yellow-300 rounded-md transition-all flex-shrink-0 active:scale-95 shadow-md"
+                        title="Предложить изменения (Сохранить копию)"
+                      >
+                        <Cloud size={18} />
+                        <span className="text-[10px] font-bold">COPY</span>
+                      </button>
+                    );
+                  }
+                })()}
                 
                 {/* ---------------------------------- */}
 
@@ -685,7 +720,7 @@ function App() {
               </button>
             </div>
           </div>
-          {/* ...Остальной интерфейс поиска и фильтров... */}
+          {/* ...Остальной интерфейс... */}
           {view === 'list' && prompts.length > 0 && (
             <div className="flex flex-col md:flex-row gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
               <div className="relative flex-grow">
