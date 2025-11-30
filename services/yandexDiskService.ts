@@ -1,15 +1,26 @@
-// Сохранение (Прямая загрузка - чтобы не было лимитов на размер)
-export const saveToYandexDisk = async (data: any) => {
+// Сохранение (С поддержкой имени файла)
+// Если customFilename передан - сохранит в новый файл (для гостей)
+// Если нет - перезапишет основной database_prompts.json (для админа)
+export const saveToYandexDisk = async (data: any, customFilename?: string) => {
   try {
-    // 1. Просим ссылку у Vercel
-    const linkResponse = await fetch('/api/yandex', { method: 'POST' });
+    const body = customFilename 
+      ? JSON.stringify({ filename: customFilename }) 
+      : JSON.stringify({}); 
+
+    // 1. Просим ссылку у Vercel (передаем имя файла, если есть)
+    const linkResponse = await fetch('/api/yandex', { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body
+    });
+    
     const linkData = await linkResponse.json();
 
     if (!linkData.href) {
       throw new Error("Не удалось получить ссылку на загрузку");
     }
 
-    // 2. Готовим данные
+    // 2. Готовим данные (Blob)
     const jsonString = JSON.stringify(data, null, 2);
     const blob = new Blob([jsonString], { type: 'application/json' });
 
@@ -30,19 +41,13 @@ export const saveToYandexDisk = async (data: any) => {
   }
 };
 
-// Загрузка (Через Прокси Vercel - чтобы не было ошибки CORS)
+// Загрузка (Всегда грузит основную базу database_prompts.json)
 export const loadFromYandexDisk = async () => {
   try {
-    // Просто просим наш сервер: "Дай мне базу"
-    // Сервер сам сходит в Яндекс и вернет JSON
     const response = await fetch('/api/yandex', { method: 'GET' });
     
-    if (response.status === 404) return null; // Файла нет
-    
-    if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || "Ошибка загрузки");
-    }
+    if (response.status === 404) return null; // Файла нет (первый запуск)
+    if (!response.ok) throw new Error("Ошибка загрузки");
     
     const data = await response.json();
     return data;
