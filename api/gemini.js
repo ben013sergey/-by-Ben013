@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  // Настройка CORS
+  // Настройка CORS (чтобы сайт мог обращаться к серверу)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -15,42 +15,38 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Нет API ключа" });
   }
 
-  // ПРЯМОЙ URL К API GOOGLE (Без библиотек)
-  // Используем самую стабильную версию 1.5 Flash
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+  // === ИСПРАВЛЕНИЕ ЗДЕСЬ ===
+  // Используем классическую модель "gemini-pro". Она работает всегда.
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`;
 
+  // Инструкция
   const systemInstruction = `
   Ты эксперт по промптам. Твоя задача: вернуть валидный JSON.
-  
-  Структура ответа:
+  Структура:
   {
     "shortTitle": "Название (RU)",
     "category": "Категория",
     "variants": {
-      "maleEn": "Prompt for male (English)",
-      "maleRu": "Промпт для парня (Russian)",
-      "femaleEn": "Prompt for female (English)",
-      "femaleRu": "Промпт для девушки (Russian)",
-      "unisexEn": "General prompt (English)",
-      "unisexRu": "Общий промпт (Russian)"
+      "maleEn": "Prompt for male (EN)",
+      "maleRu": "Промпт для парня (RU)",
+      "femaleEn": "Prompt for female (EN)",
+      "femaleRu": "Промпт для девушки (RU)",
+      "unisexEn": "Prompt (EN)",
+      "unisexRu": "Промпт (RU)"
     }
   }
-  
-  Категории (выбери одну):
-  - Портрет людей/персонажей
-  - Предметы и Дизайн продуктов
-  - Фоны и Окружение
-  - Стили и улучшения
-  - Другое
-
-  ВАЖНО: Верни ТОЛЬКО JSON объект. Без markdown, без слова json.
+  Категории: 'Портрет людей/персонажей', 'Предметы и Дизайн продуктов', 'Фоны и Окружение', 'Стили и улучшения', 'Другое'.
+  Верни ТОЛЬКО JSON. Без markdown.
   `;
 
-  // Формируем тело запроса вручную
+  // Формируем тело запроса
+  // Для gemini-pro лучше включать инструкцию прямо в текст prompt, так надежнее
+  const fullPrompt = `${systemInstruction}\n\nЗАПРОС ПОЛЬЗОВАТЕЛЯ: ${prompt}`;
+
   const requestBody = {
     contents: [{
       parts: [{
-        text: `${systemInstruction}\n\nЗапрос пользователя: ${prompt}`
+        text: fullPrompt
       }]
     }]
   };
@@ -68,12 +64,10 @@ export default async function handler(req, res) {
       throw new Error(data.error?.message || "Ошибка Google API");
     }
 
-    // Достаем текст
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     
     if (!text) throw new Error("Пустой ответ от нейросети");
 
-    // Чистим JSON от мусора
     const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
     
     return res.status(200).json(JSON.parse(cleanJson));
