@@ -1,7 +1,7 @@
-// Сохранение (Прямая загрузка)
+// Сохранение (Прямая загрузка - чтобы не было лимитов на размер)
 export const saveToYandexDisk = async (data: any) => {
   try {
-    // 1. Получаем ссылку от Vercel
+    // 1. Просим ссылку у Vercel
     const linkResponse = await fetch('/api/yandex', { method: 'POST' });
     const linkData = await linkResponse.json();
 
@@ -9,12 +9,11 @@ export const saveToYandexDisk = async (data: any) => {
       throw new Error("Не удалось получить ссылку на загрузку");
     }
 
-    // 2. Формируем данные (Blob)
-    // Если data это уже объект промптов, превращаем в строку
+    // 2. Готовим данные
     const jsonString = JSON.stringify(data, null, 2);
     const blob = new Blob([jsonString], { type: 'application/json' });
 
-    // 3. Отправляем НАПРЯМУЮ в Яндекс (минуя Vercel)
+    // 3. Отправляем НАПРЯМУЮ в Яндекс (PUT)
     const uploadResponse = await fetch(linkData.href, {
       method: 'PUT',
       body: blob
@@ -31,24 +30,21 @@ export const saveToYandexDisk = async (data: any) => {
   }
 };
 
-// Загрузка (Прямое скачивание)
+// Загрузка (Через Прокси Vercel - чтобы не было ошибки CORS)
 export const loadFromYandexDisk = async () => {
   try {
-    // 1. Получаем ссылку
-    const linkResponse = await fetch('/api/yandex', { method: 'GET' });
+    // Просто просим наш сервер: "Дай мне базу"
+    // Сервер сам сходит в Яндекс и вернет JSON
+    const response = await fetch('/api/yandex', { method: 'GET' });
     
-    if (linkResponse.status === 404) return null;
+    if (response.status === 404) return null; // Файла нет
     
-    const linkData = await linkResponse.json();
+    if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || "Ошибка загрузки");
+    }
     
-    // Если файла нет (ошибка DiskNotFoundError от Яндекса внутри JSON)
-    if (linkData.error === "DiskNotFoundError") return null;
-    if (!linkData.href) throw new Error("Файл не найден или ошибка доступа");
-
-    // 2. Скачиваем НАПРЯМУЮ с Яндекса
-    const fileResponse = await fetch(linkData.href);
-    const data = await fileResponse.json();
-    
+    const data = await response.json();
     return data;
   } catch (error) {
     console.error(error);
