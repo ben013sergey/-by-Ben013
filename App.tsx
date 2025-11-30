@@ -31,9 +31,7 @@ const STORAGE_KEY = 'promptvault_data_v1';
 const DRAFT_KEY = 'promptvault_create_draft';
 const ITEMS_PER_PAGE = 20;
 
-// === ВАШ ID (Администратор) ===
 const ADMIN_ID = 439014866; 
-// ==============================
 
 // Simple Toast Component
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => (
@@ -79,6 +77,19 @@ function App() {
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
 
+  // --- ОПРЕДЕЛЕНИЕ ПРАВ ---
+  const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+  const userId = tgUser?.id;
+  let username = tgUser?.username || tgUser?.first_name || "Guest";
+  
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlPass = urlParams.get('uid');
+
+  let isAdmin = false;
+  if (userId === ADMIN_ID) isAdmin = true;
+  if (urlPass === 'ben013') { isAdmin = true; username = "Admin (Browser)"; }
+  // ------------------------
+
   useEffect(() => {
     promptsRef.current = prompts;
   }, [prompts]);
@@ -107,24 +118,22 @@ function App() {
   // INITIAL DATA LOAD (С Яндексом)
   useEffect(() => {
     const loadData = async () => {
-      setIsDataLoaded(false); // Показываем спиннер
+      setIsDataLoaded(false); 
       try {
-        // 1. Сначала пробуем загрузить из Яндекса (это приоритет)
         const cloudData = await loadFromYandexDisk();
         
         if (cloudData && Array.isArray(cloudData) && cloudData.length > 0) {
-          setPrompts(cloudData);
-          showToast("☁️ База синхронизирована с Яндекс.Диском!", "success");
-          // Обновляем и локальную копию
-          await saveToDB(STORAGE_KEY, cloudData);
+          // ВАЖНО: Помечаем загруженные данные как Системные (защищенные)
+          const protectedData = cloudData.map(p => ({ ...p, isSystem: true }));
+          setPrompts(protectedData);
+          showToast("☁️ База синхронизирована (Защищена)!", "success");
+          await saveToDB(STORAGE_KEY, protectedData);
         } else {
-          // 2. Если в облаке пусто, берем из памяти телефона
           const dbPrompts = await loadFromDB<PromptData[]>(STORAGE_KEY);
           if (dbPrompts) setPrompts(dbPrompts);
         }
       } catch (e) {
         console.error("Load Error", e);
-        // Если ошибка интернета, грузим локально
         const dbPrompts = await loadFromDB<PromptData[]>(STORAGE_KEY);
         if (dbPrompts) setPrompts(dbPrompts);
         showToast("Нет связи с Яндексом, загружена локальная копия", "error");
@@ -167,39 +176,19 @@ function App() {
     }
   }, [inputPrompt, inputTitle, inputCategory, inputNote, selectedModel, view]);
 
-  // SAVE EFFECT 1
+  // SAVE EFFECT 1 (Local)
   useEffect(() => {
     if (!isDataLoaded) return;
-    
     const save = async () => {
       try {
         await saveToDB(STORAGE_KEY, prompts);
         setLastSaved(new Date());
       } catch (e) {
         console.error("DB Save Failed", e);
-        showToast("Ошибка сохранения. Проверьте место на диске.", "error");
       }
     };
     save();
   }, [prompts, isDataLoaded]);
-
-  // SAVE EFFECT 2 (Periodic)
-  useEffect(() => {
-    if (!isDataLoaded) return;
-
-    const intervalId = setInterval(async () => {
-      try {
-        if (promptsRef.current.length > 0) {
-           await saveToDB(STORAGE_KEY, promptsRef.current);
-           setLastSaved(new Date());
-        }
-      } catch (e) {
-        console.error("Periodic Save Failed", e);
-      }
-    }, 30000);
-
-    return () => clearInterval(intervalId);
-  }, [isDataLoaded]);
 
   useEffect(() => {
     if (toast) {
@@ -257,7 +246,8 @@ function App() {
         model: ex.model || 'Nana Banana',
         shortTitle: ex.shortTitle || 'Без названия',
         category: ex.category || 'Другое',
-        imageBase64: ex.imageBase64 || null
+        imageBase64: ex.imageBase64 || null,
+        isSystem: false // Примеры считаем не системными, их можно править
       })) as PromptData[];
       
       if (newPrompts.length === 0) {
@@ -319,7 +309,7 @@ function App() {
         if (item.usageCount === undefined) item.usageCount = 0;
         if (!item.generationHistory) item.generationHistory = [];
         if (item.variants) {
-          newMap.set(item.id, item);
+          newMap.set(item.id, { ...item, isSystem: false }); // Импортированные тоже можно править
         }
       });
       return Array.from(newMap.values());
@@ -354,7 +344,6 @@ function App() {
     try {
       const finalTitle = inputTitle.trim() ? inputTitle.trim() : "Без названия";
       const finalCategory = inputCategory ? inputCategory : "Другое";
-
       const text = inputPrompt;
 
       const newEntry: PromptData = {
@@ -373,7 +362,8 @@ function App() {
         note: inputNote.trim() || undefined,
         usageCount: 0,
         createdAt: Date.now(),
-        generationHistory: []
+        generationHistory: [],
+        isSystem: false // НОВОЕ: Это создал пользователь, значит можно править
       };
 
       setPrompts(prev => [newEntry, ...prev]);
@@ -407,7 +397,8 @@ function App() {
         note: inputNote.trim() || undefined,
         usageCount: 0,
         createdAt: Date.now(),
-        generationHistory: []
+        generationHistory: [],
+        isSystem: false // НОВОЕ: Это создал пользователь
       };
 
       setPrompts(prev => [newEntry, ...prev]);
@@ -470,6 +461,7 @@ function App() {
     showToast("Фильтры сброшены");
   };
 
+  // CATEGORY COUNT CALCULATION
   const allCategories = Array.from(new Set(prompts.map(p => p.category || 'Без категории')));
   const categoryCounts = prompts.reduce((acc, p) => {
     const cat = p.category || 'Без категории';
@@ -489,25 +481,16 @@ function App() {
     return matchesSearch && matchesCategory;
   }).sort((a, b) => {
     if (sortOrder === 'with_notes') {
-      const aHas = !!a.note;
-      const bHas = !!b.note;
-      if (aHas && !bHas) return -1;
-      if (!aHas && bHas) return 1;
-      return b.createdAt - a.createdAt;
+      const aHas = !!a.note; const bHas = !!b.note;
+      if (aHas && !bHas) return -1; if (!aHas && bHas) return 1; return b.createdAt - a.createdAt;
     }
     if (sortOrder === 'with_photo') {
-      const aHas = !!a.imageBase64;
-      const bHas = !!b.imageBase64;
-      if (aHas && !bHas) return -1;
-      if (!aHas && bHas) return 1;
-      return b.createdAt - a.createdAt;
+      const aHas = !!a.imageBase64; const bHas = !!b.imageBase64;
+      if (aHas && !bHas) return -1; if (!aHas && bHas) return 1; return b.createdAt - a.createdAt;
     }
     if (sortOrder === 'without_photo') {
-      const aHas = !!a.imageBase64;
-      const bHas = !!b.imageBase64;
-      if (!aHas && bHas) return -1;
-      if (aHas && !bHas) return 1;
-      return b.createdAt - a.createdAt;
+      const aHas = !!a.imageBase64; const bHas = !!b.imageBase64;
+      if (!aHas && bHas) return -1; if (aHas && !bHas) return 1; return b.createdAt - a.createdAt;
     }
     if (sortOrder === 'oldest') return a.createdAt - b.createdAt;
     return b.createdAt - a.createdAt;
@@ -613,9 +596,11 @@ function App() {
                     try {
                        const data = await loadFromYandexDisk();
                        if (data) {
-                         setPrompts(data);
+                         // Помечаем все загруженное как Системное (защита)
+                         const protectedData = data.map((p: any) => ({ ...p, isSystem: true }));
+                         setPrompts(protectedData);
                          showToast("✅ Загружено из облака!", "success");
-                         await saveToDB(STORAGE_KEY, data); // Сохраняем и локально
+                         await saveToDB(STORAGE_KEY, protectedData); 
                        } else {
                          showToast("Файл на Диске пуст или не найден", "error");
                        }
@@ -629,77 +614,68 @@ function App() {
                   <CloudDownload size={18} />
                 </button>
 
-                {/* 2. Сохранение (Админ по ID или по Паролю) */}
-                {(() => {
-                  // 1. Получаем данные из Телеграма
-                  const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
-                  const userId = tgUser?.id;
-                  let username = tgUser?.username || tgUser?.first_name || "Guest";
-                  
-                  // 2. Проверяем URL на наличие секретного слова
-                  const urlParams = new URLSearchParams(window.location.search);
-                  const urlPass = urlParams.get('uid');
+                {/* 2. Сохранение (Админ / Гость) */}
+                {isAdmin ? (
+                  <button 
+                    onClick={async () => {
+                      if(!confirm(`⚠️ Вы АДМИН (${username}).\nЭто действие ПЕРЕЗАПИШЕТ основную базу!\nПродолжить?`)) return;
+                      const toastId = showToast("Сохранение (Master)...", "success");
+                      try {
+                         await saveToYandexDisk(prompts); 
+                         setLastSaved(new Date());
+                         showToast("✅ Основная база обновлена!", "success");
+                      } catch(e) {
+                         showToast("Ошибка сохранения", "error");
+                      }
+                    }}
+                    className="p-2 flex items-center gap-1 text-white bg-red-600 hover:bg-red-500 rounded-md transition-all flex-shrink-0 active:scale-95 shadow-md"
+                    title="АДМИН: Перезаписать базу"
+                  >
+                    <Cloud size={18} />
+                    <span className="text-[10px] font-bold">MAIN</span>
+                  </button>
+                ) : (
+                  <button 
+                    onClick={async () => {
+                      // ФИЛЬТР: Берем только то, что создал пользователь (isSystem == false)
+                      const userPrompts = prompts.filter(p => p.isSystem === false);
+                      
+                      if (userPrompts.length === 0) {
+                        showToast("Вы ничего не создали. Нечего сохранять.", "error");
+                        return;
+                      }
 
-                  // --- ЛОГИКА ПРАВ ДОСТУПА ---
-                  let isAdmin = false;
+                      const dateStr = new Date().toISOString().slice(0,10);
+                      const safeName = `suggestion_${username}_${dateStr}.json`;
+                      
+                      const toastId = showToast(`Сохранение копии (${userPrompts.length} шт.)...`, "success");
+                      try {
+                         // Сохраняем ТОЛЬКО новые промпты
+                         await saveToYandexDisk(userPrompts, safeName);
+                         showToast(`✅ Копия сохранена: ${safeName}`, "success");
+                         
+                         // Уведомляем Админа в Телеграм
+                         fetch('/api/notify', {
+                           method: 'POST',
+                           headers: { 'Content-Type': 'application/json' },
+                           body: JSON.stringify({ 
+                             username: username, 
+                             filename: safeName, 
+                             count: userPrompts.length 
+                           })
+                         }); // Не ждем ответа (fire and forget)
 
-                  // Способ А: Совпал ID в Телеграме
-                  if (userId === ADMIN_ID) {
-                    isAdmin = true;
-                  }
-                  
-                  // Способ Б: Введено кодовое слово в браузере (?uid=ben013)
-                  if (urlPass === 'ben013') {
-                    isAdmin = true;
-                    username = "Admin (Browser)";
-                  }
-                  // ---------------------------
-
-                  if (isAdmin) {
-                    return (
-                      <button 
-                        onClick={async () => {
-                          if(!confirm(`⚠️ Вы АДМИН (${username}).\nЭто действие ПЕРЕЗАПИШЕТ основную базу!\nПродолжить?`)) return;
-                          const toastId = showToast("Сохранение (Master)...", "success");
-                          try {
-                             await saveToYandexDisk(prompts); 
-                             setLastSaved(new Date());
-                             showToast("✅ Основная база обновлена!", "success");
-                          } catch(e) {
-                             showToast("Ошибка сохранения", "error");
-                          }
-                        }}
-                        className="p-2 flex items-center gap-1 text-white bg-red-600 hover:bg-red-500 rounded-md transition-all flex-shrink-0 active:scale-95 shadow-md"
-                        title="АДМИН: Перезаписать базу"
-                      >
-                        <Cloud size={18} />
-                        <span className="text-[10px] font-bold">MAIN</span>
-                      </button>
-                    );
-                  } else {
-                    return (
-                      <button 
-                        onClick={async () => {
-                          const dateStr = new Date().toISOString().slice(0,10);
-                          const safeName = `suggestion_${username}_${dateStr}.json`;
-                          
-                          const toastId = showToast(`Сохранение копии (${username})...`, "success");
-                          try {
-                             await saveToYandexDisk(prompts, safeName);
-                             showToast(`✅ Копия сохранена: ${safeName}`, "success");
-                          } catch(e) {
-                             showToast("Ошибка сохранения", "error");
-                          }
-                        }}
-                        className="p-2 flex items-center gap-1 text-slate-900 bg-yellow-400 hover:bg-yellow-300 rounded-md transition-all flex-shrink-0 active:scale-95 shadow-md"
-                        title="Предложить изменения (Сохранить копию)"
-                      >
-                        <Cloud size={18} />
-                        <span className="text-[10px] font-bold">COPY</span>
-                      </button>
-                    );
-                  }
-                })()}
+                      } catch(e) {
+                         showToast("Ошибка сохранения", "error");
+                      }
+                    }}
+                    className="p-2 flex items-center gap-1 text-slate-900 bg-yellow-400 hover:bg-yellow-300 rounded-md transition-all flex-shrink-0 active:scale-95 shadow-md"
+                    title="Предложить изменения (Сохранить только мои)"
+                  >
+                    <Cloud size={18} />
+                    <span className="text-[10px] font-bold">COPY</span>
+                  </button>
+                )}
                 
                 {/* ---------------------------------- */}
 
@@ -859,7 +835,19 @@ function App() {
                 {sortedCategories.map((category) => (
                   <div key={category} className="space-y-4">
                     <div className="flex items-center gap-4"><h2 className="text-2xl font-bold text-white tracking-tight pl-2 border-l-4 border-indigo-500">{category}</h2><div className="h-px flex-grow bg-slate-800"></div></div>
-                    <div className="grid grid-cols-1 gap-6">{groupedPrompts[category].map((prompt) => (<PromptCard key={prompt.id} data={prompt} index={allFilteredPrompts.indexOf(prompt)} onDelete={handleDelete} onCategoryUpdate={handleCategoryUpdate} onEdit={setEditingPrompt} onUsageUpdate={handleUsageUpdate} onAddHistory={handleAddHistory}/>))}</div>
+                    <div className="grid grid-cols-1 gap-6">{groupedPrompts[category].map((prompt) => (
+                      <PromptCard 
+                        key={prompt.id} 
+                        data={prompt} 
+                        index={allFilteredPrompts.indexOf(prompt)} 
+                        onDelete={handleDelete} 
+                        onCategoryUpdate={handleCategoryUpdate} 
+                        onEdit={setEditingPrompt} 
+                        onUsageUpdate={handleUsageUpdate} 
+                        onAddHistory={handleAddHistory}
+                        isAdmin={isAdmin} // Передаем статус админа
+                      />
+                    ))}</div>
                   </div>
                 ))}
                 {hasMore && (<div className="flex justify-center pt-8"><button onClick={() => setVisibleCount(prev => prev + ITEMS_PER_PAGE)} className="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-full font-medium transition-all shadow-lg border border-slate-700 hover:border-slate-500"><ChevronDown size={20} /> Показать еще ({allFilteredPrompts.length - visibleCount})</button></div>)}
