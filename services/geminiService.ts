@@ -3,7 +3,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 // 1. АНАЛИЗ ТЕКСТА (Через сервер Vercel)
 export const analyzePrompt = async (promptText: string) => {
   try {
-    const response = await fetch('/api/gemini', {
+    const response = await fetch('/api/ai-generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: promptText }),
