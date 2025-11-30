@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // Настройки доступа
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -11,24 +10,26 @@ export default async function handler(req, res) {
   const TOKEN = process.env.YANDEX_DISK_TOKEN;
   if (!TOKEN) return res.status(500).json({ error: "Нет токена" });
 
-  // ИСПРАВЛЕНИЕ ПУТИ: Убираем слеш в начале. 
-  // Это скажет Яндексу: "Сохрани в папку этого приложения"
-  const FILE_PATH = "database_prompts.json";
-
   try {
-    // --- 1. ЗАПРОС НА СОХРАНЕНИЕ (Frontend просит ссылку) ---
+    // --- 1. СОХРАНЕНИЕ (POST) ---
     if (req.method === 'POST') {
-      // Запрашиваем у Яндекса разрешение на загрузку
-      const resp = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/upload?path=${FILE_PATH}&overwrite=true`, {
+      // Получаем имя файла от сайта. Если не прислали - используем дефолтное (опасное)
+      const { filename } = req.body; 
+      const targetPath = filename ? `/${filename}` : "/database_prompts.json";
+
+      // Запрашиваем разрешение на загрузку
+      const resp = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/upload?path=${targetPath}&overwrite=true`, {
         headers: { 'Authorization': `OAuth ${TOKEN}` }
       });
       const data = await resp.json();
-      return res.status(200).json(data); // Отдаем ссылку фронтенду
+      return res.status(200).json(data);
     }
 
-    // --- 2. ЗАПРОС НА ЗАГРУЗКУ (Vercel качает сам) ---
+    // --- 2. ЗАГРУЗКА (GET) ---
     if (req.method === 'GET') {
-      // А. Узнаем ссылку на скачивание
+      // Загружаем всегда ОСНОВНУЮ базу
+      const FILE_PATH = "/database_prompts.json";
+      
       const linkRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/download?path=${FILE_PATH}`, {
         headers: { 'Authorization': `OAuth ${TOKEN}` }
       });
@@ -38,12 +39,9 @@ export default async function handler(req, res) {
         return res.status(404).json({ error: "Файл еще не создан" });
       }
 
-      // Б. СЕРВЕР VERCEL СКАЧИВАЕТ ФАЙЛ (Обход CORS)
-      // Так как сервер в США, он скачает это мгновенно
       const fileRes = await fetch(linkData.href);
       const fileJson = await fileRes.json();
 
-      // В. Отдаем чистый JSON вашему приложению
       return res.status(200).json(fileJson);
     }
 
