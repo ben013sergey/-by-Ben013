@@ -1,4 +1,5 @@
 export default async function handler(req, res) {
+  // Настройка CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -14,13 +15,14 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Нет API ключа" });
   }
 
-  // ИСПОЛЬЗУЕМ КОНКРЕТНУЮ ВЕРСИЮ МОДЕЛИ (gemini-1.5-flash-001)
-  // Если она не сработает, Google сам переключит на gemini-pro
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-001:generateContent?key=${API_KEY}`;
+  // ПРЯМОЙ URL К API GOOGLE (Без библиотек)
+  // Используем самую стабильную версию 1.5 Flash
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
 
   const systemInstruction = `
-  Ты эксперт по промптам. Верни JSON.
-  Структура:
+  Ты эксперт по промптам. Твоя задача: вернуть валидный JSON.
+  
+  Структура ответа:
   {
     "shortTitle": "Название (RU)",
     "category": "Категория",
@@ -33,13 +35,23 @@ export default async function handler(req, res) {
       "unisexRu": "Общий промпт (Russian)"
     }
   }
-  Категории строго: 'Портрет людей/персонажей', 'Предметы и Дизайн продуктов', 'Фоны и Окружение', 'Стили и улучшения', 'Другое'.
-  Верни ТОЛЬКО JSON.
+  
+  Категории (выбери одну):
+  - Портрет людей/персонажей
+  - Предметы и Дизайн продуктов
+  - Фоны и Окружение
+  - Стили и улучшения
+  - Другое
+
+  ВАЖНО: Верни ТОЛЬКО JSON объект. Без markdown, без слова json.
   `;
 
+  // Формируем тело запроса вручную
   const requestBody = {
     contents: [{
-      parts: [{ text: `${systemInstruction}\n\nЗапрос: ${prompt}` }]
+      parts: [{
+        text: `${systemInstruction}\n\nЗапрос пользователя: ${prompt}`
+      }]
     }]
   };
 
@@ -56,7 +68,12 @@ export default async function handler(req, res) {
       throw new Error(data.error?.message || "Ошибка Google API");
     }
 
-    const text = data.candidates[0].content.parts[0].text;
+    // Достаем текст
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    
+    if (!text) throw new Error("Пустой ответ от нейросети");
+
+    // Чистим JSON от мусора
     const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
     
     return res.status(200).json(JSON.parse(cleanJson));
