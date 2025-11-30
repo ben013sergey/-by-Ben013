@@ -351,16 +351,22 @@ function App() {
       const finalTitle = inputTitle.trim() ? inputTitle.trim() : "Без названия";
       const finalCategory = inputCategory ? inputCategory : "Другое";
 
+      // ДУБЛИРУЕМ ТЕКСТ ВО ВСЕ ВАРИАНТЫ
+      // Чтобы не было пустых полей при ручном вводе
+      const text = inputPrompt;
+
       const newEntry: PromptData = {
         id: generateId(),
-        originalPrompt: inputPrompt,
+        originalPrompt: text,
         model: selectedModel,
         category: finalCategory,
         shortTitle: finalTitle,
         variants: {
-            male: inputPrompt,
-            female: inputPrompt,
-            unisex: inputPrompt
+            maleEn: text, maleRu: text,
+            femaleEn: text, femaleRu: text,
+            unisexEn: text, unisexRu: text,
+            // Для совместимости со старым кодом (на всякий случай)
+            male: text, female: text, unisex: text 
         },
         imageBase64: uploadedImage,
         note: inputNote.trim() || undefined,
@@ -370,7 +376,7 @@ function App() {
       };
 
       setPrompts(prev => [newEntry, ...prev]);
-      showToast("Промпт сохранен (без обработки)!");
+      showToast("Промпт сохранен вручную!");
       clearCreateForm();
 
     } catch (error) {
