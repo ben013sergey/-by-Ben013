@@ -8,68 +8,31 @@ export default async function handler(req, res) {
   }
 
   const TOKEN = process.env.YANDEX_DISK_TOKEN;
-  if (!TOKEN) {
-    return res.status(500).json({ error: "Нет токена Яндекса" });
-  }
+  if (!TOKEN) return res.status(500).json({ error: "Нет токена" });
 
-  // ИСПРАВЛЕНИЕ: Убираем "app:/", используем просто корень
+  // Строгое имя файла для синхронизации
   const FILE_PATH = "/database_prompts.json";
 
   try {
-    // --- 1. СОХРАНЕНИЕ (POST) ---
+    // 1. ЗАПРОС НА СОХРАНЕНИЕ (Получить URL для загрузки)
     if (req.method === 'POST') {
-      const { content } = req.body;
-      const fileContent = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
-
-      // А. Получаем ссылку для загрузки
-      const uploadUrlRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/upload?path=${FILE_PATH}&overwrite=true`, {
+      const resp = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/upload?path=${FILE_PATH}&overwrite=true`, {
         headers: { 'Authorization': `OAuth ${TOKEN}` }
       });
-      
-      if (!uploadUrlRes.ok) {
-          const err = await uploadUrlRes.json();
-          throw new Error(`Ошибка получения ссылки: ${err.message}`);
-      }
-      
-      const uploadUrlData = await uploadUrlRes.json();
-
-      // Б. Загружаем файл
-      const uploadRes = await fetch(uploadUrlData.href, {
-        method: 'PUT',
-        body: fileContent
-        // Яндекс сам поймет тип, заголовки тут не обязательны, но body нужен
-      });
-
-      if (!uploadRes.ok) {
-         throw new Error("Ошибка при записи файла: " + uploadRes.statusText);
-      }
-
-      return res.status(200).json({ status: "saved" });
+      const data = await resp.json();
+      return res.status(200).json(data); // Возвращаем ссылку { href: "..." }
     }
 
-    // --- 2. ЗАГРУЗКА (GET) ---
+    // 2. ЗАПРОС НА ЗАГРУЗКУ (Получить URL для скачивания)
     if (req.method === 'GET') {
-      const downloadUrlRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/download?path=${FILE_PATH}`, {
+      const resp = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/download?path=${FILE_PATH}`, {
         headers: { 'Authorization': `OAuth ${TOKEN}` }
       });
-      const downloadUrlData = await downloadUrlRes.json();
-
-      if (downloadUrlData.error === "DiskNotFoundError") {
-        return res.status(404).json({ error: "Файл еще не создан" });
-      }
-      
-      if (!downloadUrlRes.ok) {
-         throw new Error(downloadUrlData.message || "Ошибка получения ссылки");
-      }
-
-      const fileRes = await fetch(downloadUrlData.href);
-      const fileData = await fileRes.json();
-
-      return res.status(200).json(fileData);
+      const data = await resp.json();
+      return res.status(200).json(data); // Возвращаем ссылку { href: "..." }
     }
 
   } catch (error) {
-    console.error("Yandex Error:", error);
     return res.status(500).json({ error: error.message });
   }
 }
