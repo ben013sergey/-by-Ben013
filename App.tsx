@@ -634,11 +634,11 @@ function App() {
                        showToast("Ошибка сохранения", "error");
                     }
                   }}
-                  className="p-2 text-white bg-red-600 hover:bg-red-500 rounded-md transition-all flex-shrink-0 active:scale-95 shadow-md"
+                  className="p-2 flex items-center justify-center text-white bg-red-600 hover:bg-red-500 rounded-md transition-all flex-shrink-0 active:scale-95 shadow-md"
                   title="Сохранить на Яндекс.Диск"
                 >
                   <Cloud size={18} />
-                  <span className="ml-1 text-[10px] font-bold">Ya</span>
+                  <span className="ml-1 text-[10px] font-bold leading-none">Ya</span>
                 </button>
                 
                 {/* ---------------------------------- */}
