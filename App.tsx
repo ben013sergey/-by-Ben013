@@ -33,7 +33,7 @@ const ITEMS_PER_PAGE = 20;
 const ADMIN_ID = 439014866; 
 
 // !!! ВАЖНО: Вставьте сюда ссылку на ваш канал для кнопки
-const CHANNEL_LINK = "https://t.me/ВАШ_КАНАЛ"; 
+const CHANNEL_LINK = "https://t.me/ben013_promt_gallery"; 
 
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => (
   <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border animate-in slide-in-from-bottom-5 fade-in duration-300 ${
