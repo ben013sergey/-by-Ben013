@@ -13,17 +13,14 @@ export interface GeneratedImage {
   aspectRatio: AspectRatio;
 }
 
-// 1. Создаем специальный интерфейс для вариантов, чтобы поддерживать и старое, и новое
 export interface PromptVariants {
-  // Новые поля (могут отсутствовать в старых записях, поэтому ?)
   maleEn?: string;
   maleRu?: string;
   femaleEn?: string;
   femaleRu?: string;
   unisexEn?: string;
   unisexRu?: string;
-
-  // Старые поля (оставляем для совместимости с вашей текущей базой)
+  // Старые поля
   male?: string;
   female?: string;
   unisex?: string;
@@ -36,7 +33,6 @@ export interface PromptData {
   category: string;
   shortTitle: string;
   
-  // 2. Используем обновленную структуру вариантов
   variants: PromptVariants;
   
   imageBase64: string | null;
@@ -44,12 +40,14 @@ export interface PromptData {
   usageCount?: number; 
   generationHistory?: GeneratedImage[]; 
   createdAt: number;
+  
+  // НОВОЕ ПОЛЕ: Защита от редактирования
+  isSystem?: boolean; 
 }
 
 export interface GeminiAnalysisResult {
   category: string;
   shortTitle: string;
-  // 3. Тут тоже обновляем
   variants: PromptVariants;
 }
 
