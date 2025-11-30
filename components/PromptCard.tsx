@@ -1,8 +1,14 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { PromptData, GenderVariant, VALID_CATEGORIES, AspectRatio, GeneratedImage } from '../types';
-import { Copy, Check, Trash2, Image as ImageIcon, X, Maximize2, Clock, Edit2, Play, Loader2, Upload, Pencil, Ratio, ZoomIn, ZoomOut, Download, Move, RotateCcw, StickyNote, History, ChevronRight, ChevronDown, Scaling } from 'lucide-react';
+import { PromptData, VALID_CATEGORIES, AspectRatio, GeneratedImage } from '../types';
+import { Copy, Check, Trash2, Image as ImageIcon, X, Maximize2, Clock, Edit2, Play, Loader2, Upload, Pencil, ZoomIn, ZoomOut, Download, RotateCcw, StickyNote, History, ChevronRight, ChevronDown, Scaling, Languages } from 'lucide-react';
 import { generateNanoBananaImage } from '../services/geminiService';
+
+// Определяем enum локально, чтобы не зависеть от старого types.ts, если там что-то не обновилось
+enum GenderVariant {
+  Male = 'Male',
+  Female = 'Female',
+  Unisex = 'Unisex'
+}
 
 interface PromptCardProps {
   data: PromptData;
@@ -16,11 +22,12 @@ interface PromptCardProps {
 
 const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCategoryUpdate, onEdit, onUsageUpdate, onAddHistory }) => {
   const [activeVariant, setActiveVariant] = useState<GenderVariant>(GenderVariant.Female);
+  const [showRussian, setShowRussian] = useState(false); // НОВОЕ: Переключатель языка
+
   const [copied, setCopied] = useState(false);
   const [copyAnim, setCopyAnim] = useState(false);
   
   const [activeModalImage, setActiveModalImage] = useState<string | null>(null);
-  
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
   // Testing State
@@ -35,7 +42,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   // History Panel State
   const [showHistory, setShowHistory] = useState(false);
 
-  // Zoom & Pan State for Modal
+  // Zoom & Pan State
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panPosition, setPanPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -47,10 +54,24 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const [rotateX, setRotateX] = useState(0);
   const [rotateY, setRotateY] = useState(0);
 
-  const currentPromptText = 
-    activeVariant === GenderVariant.Male ? data.variants.male :
-    activeVariant === GenderVariant.Female ? data.variants.female :
-    data.variants.unisex;
+  // ЛОГИКА ВЫБОРА ТЕКСТА (С учетом языка)
+  const getCurrentText = () => {
+    if (activeVariant === GenderVariant.Female) {
+        return showRussian ? (data.variants.femaleRu || data.variants.female) : (data.variants.femaleEn || data.variants.female);
+    }
+    if (activeVariant === GenderVariant.Male) {
+        return showRussian ? (data.variants.maleRu || data.variants.male) : (data.variants.maleEn || data.variants.male);
+    }
+    // Unisex
+    return showRussian ? (data.variants.unisexRu || data.variants.unisex) : (data.variants.unisexEn || data.variants.unisex);
+  };
+
+  // Текст для генерации (Всегда английский)
+  const getGenerationText = () => {
+     if (activeVariant === GenderVariant.Female) return data.variants.femaleEn || data.variants.female;
+     if (activeVariant === GenderVariant.Male) return data.variants.maleEn || data.variants.male;
+     return data.variants.unisexEn || data.variants.unisex;
+  };
 
   useEffect(() => {
     if (!activeModalImage) {
@@ -60,7 +81,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   }, [activeModalImage]);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(currentPromptText);
+    navigator.clipboard.writeText(getCurrentText());
     setCopied(true);
     setCopyAnim(true);
     setTimeout(() => setCopyAnim(false), 300);
@@ -69,11 +90,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
 
   const formatDate = (timestamp: number) => {
     return new Date(timestamp).toLocaleString('ru-RU', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+      day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
     });
   };
 
@@ -83,7 +100,8 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     setGeneratedImage(null);
 
     try {
-      const result = await generateNanoBananaImage(currentPromptText, testReferenceImage, aspectRatio, upscale);
+      // Используем английский текст для генерации
+      const result = await generateNanoBananaImage(getGenerationText(), testReferenceImage, aspectRatio, upscale);
       setGeneratedImage(result);
       onUsageUpdate(data.id);
       
@@ -100,44 +118,18 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
       }
 
     } catch (e: any) {
-      if (e.message && e.message.includes('UPSCALE_FAILED')) {
-        setGenError(e.message);
-      } else {
-        setGenError(e.message || "Ошибка генерации. Проверьте API ключ или лимиты.");
-      }
+      setGenError(e.message || "Ошибка генерации.");
     } finally {
       setIsGenerating(false);
     }
   };
   
-  const analyzeError = (errorMsg: string): string => {
-      const lowerMsg = errorMsg.toLowerCase();
-      if (lowerMsg.includes('upscale_failed')) {
-          return 'Ошибка Upscale: Не удалось создать изображение в 2K. Возможно, функция недоступна для вашего аккаунта или модель перегружена.';
-      }
-      if (lowerMsg.includes('403') || lowerMsg.includes('permission_denied') || lowerMsg.includes('api key')) {
-          return 'Вероятная причина: Проблема с API ключом. Убедитесь, что он действителен и имеет доступ к модели.';
-      }
-      if (lowerMsg.includes('rate limit')) {
-          return 'Вероятная причина: Превышен лимит запросов. Пожалуйста, подождите немного.';
-      }
-      if (lowerMsg.includes('policy') || lowerMsg.includes('safety')) {
-          return 'Вероятная причина: Сработали фильтры безопасности контента. Попробуйте изменить промпт.';
-      }
-      if (lowerMsg.includes('модель вернула текст')) {
-          return 'Вероятная причина: Модель не поняла, что нужно сгенерировать изображение, и ответила текстом. Попробуйте сделать промпт более конкретным.';
-      }
-      return 'Вероятная причина: Общая ошибка сервера или сети. Повторите попытку позже.';
-  };
-
-
+  // ... Остальные обработчики (RefUpload, Download, Zoom и т.д.) оставляем как были ...
   const handleRefUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setTestReferenceImage(reader.result as string);
-      };
+      reader.onloadend = () => setTestReferenceImage(reader.result as string);
       reader.readAsDataURL(file);
     }
   };
@@ -147,7 +139,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     if (data.imageBase64) {
       const link = document.createElement('a');
       link.href = data.imageBase64;
-      link.download = `${data.shortTitle.replace(/\s+/g, '_')}_ref.png`;
+      link.download = `${data.shortTitle}_ref.png`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -156,52 +148,28 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
 
   const handleCardMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!cardRef.current) return;
-    const card = cardRef.current;
-    const rect = card.getBoundingClientRect();
+    const rect = cardRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
-    
-    const rotateXVal = ((y - centerY) / centerY) * -3; 
-    const rotateYVal = ((x - centerX) / centerX) * 3;
-
-    setRotateX(rotateXVal);
-    setRotateY(rotateYVal);
+    setRotateX(((y - centerY) / centerY) * -3); 
+    setRotateY(((x - centerX) / centerX) * 3);
   };
 
-  const handleCardMouseEnter = () => {
-    setIsHovered(true);
-  };
+  const handleCardMouseEnter = () => setIsHovered(true);
+  const handleCardMouseLeave = () => { setIsHovered(false); setRotateX(0); setRotateY(0); };
 
-  const handleCardMouseLeave = () => {
-    setIsHovered(false);
-    setRotateX(0);
-    setRotateY(0);
-  };
-
-  const handleZoomIn = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setZoomLevel(prev => Math.min(prev + 0.5, 5));
-  };
-
-  const handleZoomOut = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setZoomLevel(prev => Math.max(prev - 0.5, 0.5));
-  };
-
-  const handleResetZoom = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setZoomLevel(1);
-    setPanPosition({ x: 0, y: 0 });
-  };
+  const handleZoomIn = (e: React.MouseEvent) => { e.stopPropagation(); setZoomLevel(prev => Math.min(prev + 0.5, 5)); };
+  const handleZoomOut = (e: React.MouseEvent) => { e.stopPropagation(); setZoomLevel(prev => Math.max(prev - 0.5, 0.5)); };
+  const handleResetZoom = (e: React.MouseEvent) => { e.stopPropagation(); setZoomLevel(1); setPanPosition({ x: 0, y: 0 }); };
 
   const handleDownloadImage = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (activeModalImage) {
       const link = document.createElement('a');
       link.href = activeModalImage;
-      link.download = `${data.shortTitle.replace(/\s+/g, '_')}_${Date.now()}.png`;
+      link.download = `generated_${Date.now()}.png`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -219,25 +187,16 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const handleMouseMove = (e: React.MouseEvent) => {
     if (isDragging && dragStartRef.current) {
       e.preventDefault();
-      setPanPosition({
-        x: e.clientX - dragStartRef.current.x,
-        y: e.clientY - dragStartRef.current.y
-      });
+      setPanPosition({ x: e.clientX - dragStartRef.current.x, y: e.clientY - dragStartRef.current.y });
     }
   };
 
-  const handleMouseUp = () => {
-    setIsDragging(false);
-    dragStartRef.current = null;
-  };
-
+  const handleMouseUp = () => { setIsDragging(false); dragStartRef.current = null; };
+  
   const handleWheel = (e: React.WheelEvent) => {
     if (e.ctrlKey || activeModalImage) {
-      if (e.deltaY < 0) {
-        setZoomLevel(prev => Math.min(prev + 0.1, 5));
-      } else {
-        setZoomLevel(prev => Math.max(prev - 0.1, 0.5));
-      }
+      if (e.deltaY < 0) setZoomLevel(prev => Math.min(prev + 0.1, 5));
+      else setZoomLevel(prev => Math.max(prev - 0.1, 0.5));
     }
   };
 
@@ -260,12 +219,8 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
           
           <div className="flex-shrink-0 flex flex-col items-center gap-3 md:w-48">
             <div className="flex items-center justify-between w-full px-1">
-               <div className="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-300 font-bold text-sm border border-indigo-500/50">
-                 #{index + 1}
-               </div>
-               <div className="text-xs text-slate-400 font-mono bg-slate-900 px-2 py-1 rounded">
-                 {data.model}
-               </div>
+               <div className="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-500/20 text-indigo-300 font-bold text-sm border border-indigo-500/50">#{index + 1}</div>
+               <div className="text-xs text-slate-400 font-mono bg-slate-900 px-2 py-1 rounded">{data.model}</div>
             </div>
             
             <div 
@@ -274,37 +229,17 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
             >
               {data.imageBase64 ? (
                 <>
-                  <img 
-                    src={data.imageBase64} 
-                    alt={data.shortTitle} 
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                  />
+                  <img src={data.imageBase64} alt={data.shortTitle} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/>
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-                    <button 
-                      onClick={handleMainImageDownload}
-                      className="absolute top-2 left-2 p-1.5 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md z-10" 
-                      title="Скачать PNG"
-                    >
-                      <Download size={16} />
-                    </button>
-                    
-                    <button className="p-2 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md transform scale-90 group-hover:scale-100" title="Открыть">
-                      <Maximize2 size={24} />
-                    </button>
+                    <button onClick={handleMainImageDownload} className="absolute top-2 left-2 p-1.5 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md z-10"><Download size={16} /></button>
+                    <button className="p-2 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md transform scale-90 group-hover:scale-100"><Maximize2 size={24} /></button>
                   </div>
                 </>
               ) : (
-                <div className="w-full h-full flex flex-col items-center justify-center text-slate-500">
-                  <ImageIcon size={32} />
-                  <span className="text-xs mt-2">Нет фото</span>
-                </div>
+                <div className="w-full h-full flex flex-col items-center justify-center text-slate-500"><ImageIcon size={32} /><span className="text-xs mt-2">Нет фото</span></div>
               )}
             </div>
-            
-            <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-auto">
-              <Clock size={10} />
-              <span>{formatDate(data.createdAt)}</span>
-            </div>
+            <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-auto"><Clock size={10} /><span>{formatDate(data.createdAt)}</span></div>
           </div>
 
           <div className="flex-grow flex flex-col min-w-0">
@@ -316,25 +251,16 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                   onBlur={() => setTimeout(() => setShowCategoryDropdown(false), 200)}
                   tabIndex={0}
                 >
-                  <span className="text-xs text-indigo-400 font-medium uppercase tracking-wider hover:text-indigo-300 transition-colors truncate">
-                    {data.category}
-                  </span>
+                  <span className="text-xs text-indigo-400 font-medium uppercase tracking-wider hover:text-indigo-300 transition-colors truncate">{data.category}</span>
                   <Edit2 size={10} className="text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                   
                   {showCategoryDropdown && (
                     <div className="absolute top-full left-0 mt-1 z-20 bg-slate-800 border border-slate-600 rounded-lg shadow-xl w-64 py-1 animate-in fade-in slide-in-from-top-2 duration-150">
-                       <div className="px-3 py-1 text-[10px] text-slate-500 font-bold uppercase tracking-wider border-b border-slate-700/50 mb-1">
-                         Сменить категорию
-                       </div>
                        {VALID_CATEGORIES.map(cat => (
                          <div 
                            key={cat}
                            className={`px-3 py-2 text-xs hover:bg-indigo-600 hover:text-white cursor-pointer transition-colors ${data.category === cat ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300'}`}
-                           onClick={(e) => {
-                             e.stopPropagation();
-                             onCategoryUpdate(data.id, cat);
-                             setShowCategoryDropdown(false);
-                           }}
+                           onClick={(e) => { e.stopPropagation(); onCategoryUpdate(data.id, cat); setShowCategoryDropdown(false); }}
                          >
                            {cat}
                          </div>
@@ -342,33 +268,12 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                     </div>
                   )}
                 </div>
-
-                <h3 className="text-lg font-semibold text-white truncate w-full" title={data.shortTitle}>
-                  {data.shortTitle}
-                </h3>
+                <h3 className="text-lg font-semibold text-white truncate w-full" title={data.shortTitle}>{data.shortTitle}</h3>
               </div>
               
               <div className="flex items-center gap-1 flex-shrink-0">
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onEdit(data);
-                  }}
-                  className="text-slate-500 hover:text-white hover:bg-slate-700 rounded p-1.5 transition-all"
-                  title="Редактировать карточку"
-                >
-                  <Pencil size={18} />
-                </button>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete(data.id);
-                  }}
-                  className="text-slate-500 hover:text-red-400 hover:bg-slate-700/50 rounded p-1.5 transition-all"
-                  title="Удалить"
-                >
-                  <Trash2 size={18} />
-                </button>
+                <button onClick={(e) => { e.stopPropagation(); onEdit(data); }} className="text-slate-500 hover:text-white hover:bg-slate-700 rounded p-1.5 transition-all"><Pencil size={18} /></button>
+                <button onClick={(e) => { e.stopPropagation(); onDelete(data.id); }} className="text-slate-500 hover:text-red-400 hover:bg-slate-700/50 rounded p-1.5 transition-all"><Trash2 size={18} /></button>
               </div>
             </div>
 
@@ -390,8 +295,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                       : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                   }`}
                 >
-                  {variant === GenderVariant.Female ? 'Девушка' : 
-                   variant === GenderVariant.Male ? 'Парень' : 'Унисекс'}
+                  {variant === GenderVariant.Female ? 'Девушка' : variant === GenderVariant.Male ? 'Парень' : 'Унисекс'}
                 </button>
               ))}
             </div>
@@ -399,248 +303,102 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
             <div className="bg-slate-900/50 rounded-lg border border-slate-700/50 flex-grow grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-slate-700/50">
               
               <div className="p-3 lg:col-span-2 flex flex-col relative group">
-                <p className="text-sm text-slate-300 font-mono leading-relaxed break-words whitespace-pre-wrap flex-grow">
-                  {currentPromptText}
+                <p className="text-sm text-slate-300 font-mono leading-relaxed break-words whitespace-pre-wrap flex-grow h-full max-h-[300px] overflow-y-auto">
+                  {getCurrentText()}
                 </p>
-                <div className="flex justify-end mt-2">
+                
+                {/* --- КНОПКИ ВНИЗУ ТЕКСТА --- */}
+                <div className="flex justify-end gap-2 mt-2">
+                  {/* Кнопка перевода */}
+                  <button
+                    onClick={() => setShowRussian(!showRussian)}
+                    className={`p-2 rounded-md transition-all text-xs flex items-center gap-1 ${
+                      showRussian 
+                        ? 'bg-blue-600 text-white' 
+                        : 'bg-slate-800 text-slate-400 hover:text-blue-400'
+                    }`}
+                    title={showRussian ? "Показать оригинал (EN)" : "Показать перевод (RU)"}
+                  >
+                    <Languages size={14} />
+                    <span>{showRussian ? 'RU' : 'EN'}</span>
+                  </button>
+
                   <button
                     onClick={handleCopy}
                     className="p-2 rounded-md bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-all border border-slate-600 flex items-center gap-2 text-xs"
-                    title="Копировать"
                   >
-                    {copied ? (
-                      <>
-                        <Check size={14} className={`text-green-400 transition-transform duration-300 ${copyAnim ? 'scale-150' : 'scale-100'}`} />
-                        <span className="text-green-400">Скопировано</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy size={14} className={`transition-transform duration-300 ${copyAnim ? 'scale-125' : 'scale-100'}`} />
-                        <span>Копировать</span>
-                      </>
-                    )}
+                    {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+                    <span>{copied ? 'Copied' : 'Copy'}</span>
                   </button>
                 </div>
               </div>
 
               <div className="p-3 bg-slate-900/80 flex flex-col gap-3">
-                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                   Тест (Gemini 3 Pro)
-                 </div>
+                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Тест (Генерация)</div>
                  
                  <div className="relative group/upload">
                    {testReferenceImage ? (
                      <div className="relative w-full h-32 rounded-lg overflow-hidden border border-slate-600 bg-black/50">
                        <img src={testReferenceImage} className="w-full h-full object-cover opacity-80" alt="ref" />
-                       <button 
-                         onClick={() => setTestReferenceImage(null)}
-                         className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-1 hover:bg-red-500/80 transition-colors"
-                       >
-                         <X size={12} />
-                       </button>
-                       <div className="absolute bottom-0 inset-x-0 bg-black/60 text-[10px] text-center text-white py-0.5">
-                         Референс
-                       </div>
+                       <button onClick={() => setTestReferenceImage(null)} className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-1 hover:bg-red-500/80"><X size={12} /></button>
                      </div>
                    ) : (
                      <label className="w-full h-24 border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-colors">
-                       <Upload size={16} className="text-slate-500 mb-1" />
-                       <span className="text-[10px] text-slate-400 text-center px-2">Загрузить фото для теста</span>
-                       <input type="file" accept="image/*" className="hidden" onChange={handleRefUpload} />
+                       <Upload size={16} className="text-slate-500 mb-1" /><span className="text-[10px] text-slate-400 text-center px-2">Загрузить фото</span><input type="file" accept="image/*" className="hidden" onChange={handleRefUpload} />
                      </label>
                    )}
                  </div>
 
                  <div className="flex flex-col gap-2 w-full">
-                   <button
-                     onClick={handleTestGeneration}
-                     disabled={isGenerating}
-                     className={`w-full h-10 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${
-                       isGenerating 
-                       ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                       : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20 active:scale-[0.98]'
-                     }`}
-                   >
-                     {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} fill="currentColor" />}
-                     {isGenerating ? 'Generating...' : 'Тест (Генерация)'}
+                   <button onClick={handleTestGeneration} disabled={isGenerating} className={`w-full h-10 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${isGenerating ? 'bg-slate-700 text-slate-400' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg'}`}>
+                     {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} fill="currentColor" />} {isGenerating ? 'Wait...' : 'Генерировать'}
                    </button>
 
                    <div className="flex gap-2 h-10">
-                      <div className="h-full px-3 bg-slate-800 border border-slate-600 rounded-lg flex items-center justify-center text-xs text-slate-400 font-mono min-w-[40px]" title="Количество успешных генераций">
-                        {data.usageCount || 0}
-                      </div>
-                      
+                      <div className="h-full px-3 bg-slate-800 border border-slate-600 rounded-lg flex items-center justify-center text-xs text-slate-400 font-mono min-w-[40px]">{data.usageCount || 0}</div>
                       <div className="relative flex-grow h-full">
-                        <select
-                          value={aspectRatio}
-                          onChange={(e) => setAspectRatio(e.target.value as AspectRatio)}
-                          className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-xs text-slate-300 focus:border-indigo-500 outline-none cursor-pointer hover:bg-slate-700 appearance-none text-center"
-                          title="Соотношение сторон"
-                        >
-                          {aspectRatioOptions.map(ratio => (
-                            <option key={ratio} value={ratio}>{ratio}</option>
-                          ))}
+                        <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value as AspectRatio)} className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-xs text-slate-300 outline-none">
+                          {aspectRatioOptions.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}
                         </select>
                       </div>
-                      
-                      <button
-                          onClick={() => setUpscale(!upscale)}
-                          className={`h-full aspect-square rounded-lg flex items-center justify-center border transition-all ${
-                            upscale 
-                              ? 'bg-indigo-600 border-indigo-500 text-white shadow-indigo-500/20 shadow-md' 
-                              : 'bg-slate-800 border-slate-600 text-slate-400 hover:text-white hover:bg-slate-700'
-                          }`}
-                          title={upscale ? "Upscale включен (Высокое разрешение)" : "Включить Upscale"}
-                       >
-                         <Scaling size={18} />
-                       </button>
+                      <button onClick={() => setUpscale(!upscale)} className={`h-full aspect-square rounded-lg flex items-center justify-center border transition-all ${upscale ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-600 text-slate-400'}`}><Scaling size={18} /></button>
                    </div>
                  </div>
 
-                 {isGenerating && (
-                   <div className="mt-2 h-40 w-full bg-slate-800/50 rounded-lg border border-slate-700/50 flex flex-col items-center justify-center animate-pulse">
-                     <Loader2 size={24} className="text-emerald-500 animate-spin mb-2" />
-                     <span className="text-[10px] text-slate-400 font-medium">Создание изображения...</span>
-                   </div>
-                 )}
-
                  {generatedImage && !isGenerating && (
                    <div className="mt-2 animate-in fade-in zoom-in duration-300">
-                     <div 
-                       className="relative w-full h-40 rounded-lg overflow-hidden border border-emerald-500/50 shadow-lg group/result cursor-pointer" 
-                       onClick={() => setActiveModalImage(generatedImage)}
-                     >
+                     <div className="relative w-full h-40 rounded-lg overflow-hidden border border-emerald-500/50 shadow-lg cursor-pointer" onClick={() => setActiveModalImage(generatedImage)}>
                        <img src={generatedImage} className="w-full h-full object-cover" alt="Generated" />
-                       <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover/result:bg-black/30 transition-colors">
-                         <Maximize2 className="text-white opacity-0 group-hover/result:opacity-100 drop-shadow-md" size={20} />
-                       </div>
                      </div>
-                     <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        const link = document.createElement('a');
-                        link.href = generatedImage;
-                        link.download = `generated_${data.id}.png`;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                      }}
-                      className="block w-full text-center text-[10px] text-emerald-400 mt-1 hover:underline"
-                    >
-                       Скачать результат
-                     </button>
                    </div>
                  )}
                  
-                 {data.generationHistory && data.generationHistory.length > 0 && (
-                    <div className="mt-2 border-t border-slate-700/50 pt-2">
-                      <button 
-                        onClick={() => setShowHistory(!showHistory)}
-                        className="flex items-center gap-1.5 text-[10px] text-slate-400 hover:text-indigo-400 w-full mb-2"
-                      >
-                        <History size={10} />
-                        <span className="flex-grow text-left">История генераций ({data.generationHistory.length})</span>
-                        {showHistory ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-                      </button>
-                      
-                      {showHistory && (
-                        <div className="grid grid-cols-4 gap-2 animate-in slide-in-from-top-1">
-                          {data.generationHistory.map((historyItem) => (
-                            <div 
-                              key={historyItem.id} 
-                              className="relative aspect-square rounded overflow-hidden border border-slate-700 cursor-pointer hover:border-indigo-500 transition-colors"
-                              onClick={() => setActiveModalImage(historyItem.url)}
-                              title={new Date(historyItem.timestamp).toLocaleString()}
-                            >
-                              <img src={historyItem.url} alt="history" className="w-full h-full object-cover" />
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                 )}
-                 
-                 {genError && (
-                    <div className="mt-2 text-xs text-red-400 bg-red-500/10 p-3 rounded-lg border border-red-500/20 space-y-2">
-                        <p className="font-bold">Ошибка генерации</p>
-                        <p className="font-mono text-[10px] break-words">{genError}</p>
-                        <p className="text-red-400/80 text-[10px] border-t border-red-500/20 pt-2 mt-2">{analyzeError(genError)}</p>
-                        
-                        {/* Special button for upscale failure */}
-                        {genError.includes('UPSCALE_FAILED') && (
-                          <button
-                            onClick={() => {
-                              setUpscale(false);
-                              // Optional: Immediately retry without upscale or just let user click Test again
-                              // handleTestGeneration(); 
-                            }}
-                            className="w-full py-1.5 bg-red-500 text-white rounded font-bold text-[10px] hover:bg-red-600 transition-colors"
-                          >
-                            Отключить Upscale и повторить
-                          </button>
-                        )}
-
-                        <button
-                            onClick={() => navigator.clipboard.writeText(genError)}
-                            className="w-full text-center text-[10px] text-red-400/80 mt-1 hover:underline"
-                        >
-                            Копировать ошибку
-                        </button>
-                    </div>
-                 )}
+                 {genError && <div className="mt-2 text-xs text-red-400 bg-red-500/10 p-2 rounded border border-red-500/20">{genError}</div>}
               </div>
-
             </div>
           </div>
         </div>
       </div>
 
       {activeModalImage && (
-        <div 
-          className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center overflow-hidden animate-in fade-in duration-200"
-          onWheel={handleWheel}
-        >
+        <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center overflow-hidden" onWheel={handleWheel}>
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[110] flex items-center gap-2 bg-slate-800/90 border border-slate-700 rounded-full px-4 py-2 shadow-2xl backdrop-blur-md">
-             <button onClick={handleZoomOut} className="p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded-full transition-colors" title="Уменьшить">
-               <ZoomOut size={20} />
-             </button>
-             <span className="text-xs text-slate-400 w-12 text-center select-none">{Math.round(zoomLevel * 100)}%</span>
-             <button onClick={handleZoomIn} className="p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded-full transition-colors" title="Увеличить">
-               <ZoomIn size={20} />
-             </button>
+             <button onClick={handleZoomOut} className="p-2 text-slate-300 hover:text-white"><ZoomOut size={20} /></button>
+             <span className="text-xs text-slate-400 w-12 text-center">{Math.round(zoomLevel * 100)}%</span>
+             <button onClick={handleZoomIn} className="p-2 text-slate-300 hover:text-white"><ZoomIn size={20} /></button>
              <div className="w-px h-6 bg-slate-600 mx-1"></div>
-             <button onClick={handleResetZoom} className="p-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded-full transition-colors" title="Сбросить">
-               <RotateCcw size={20} />
-             </button>
-             <button onClick={handleDownloadImage} className="p-2 text-indigo-400 hover:text-white hover:bg-indigo-600 rounded-full transition-colors" title="Скачать">
-               <Download size={20} />
-             </button>
+             <button onClick={handleResetZoom} className="p-2 text-slate-300 hover:text-white"><RotateCcw size={20} /></button>
+             <button onClick={handleDownloadImage} className="p-2 text-indigo-400 hover:text-white"><Download size={20} /></button>
              <div className="w-px h-6 bg-slate-600 mx-1"></div>
-             <button 
-               onClick={() => setActiveModalImage(null)} 
-               className="p-2 text-red-400 hover:text-white hover:bg-red-600 rounded-full transition-colors" 
-               title="Закрыть"
-              >
-               <X size={20} />
-             </button>
+             <button onClick={() => setActiveModalImage(null)} className="p-2 text-red-400 hover:text-white"><X size={20} /></button>
           </div>
-
           <div 
             className={`w-full h-full flex items-center justify-center ${zoomLevel > 1 ? 'cursor-move' : 'cursor-default'}`}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
+            onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
           >
             <img 
-              src={activeModalImage} 
-              alt="Full view" 
-              className="max-w-none transition-transform duration-75 ease-linear select-none"
-              style={{ 
-                transform: `translate(${panPosition.x}px, ${panPosition.y}px) scale(${zoomLevel})`,
-                maxHeight: zoomLevel === 1 ? '90vh' : 'none',
-                maxWidth: zoomLevel === 1 ? '90vw' : 'none',
-              }}
+              src={activeModalImage} alt="Full view" className="max-w-none transition-transform duration-75 ease-linear select-none"
+              style={{ transform: `translate(${panPosition.x}px, ${panPosition.y}px) scale(${zoomLevel})`, maxHeight: zoomLevel === 1 ? '90vh' : 'none', maxWidth: zoomLevel === 1 ? '90vw' : 'none' }}
               draggable={false}
             />
           </div>
