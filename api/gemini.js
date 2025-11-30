@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // CORS заголовки
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -15,43 +14,32 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Нет API ключа" });
   }
 
-  // Прямой запрос к Gemini 1.5 Flash
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+  // ИСПОЛЬЗУЕМ КОНКРЕТНУЮ ВЕРСИЮ МОДЕЛИ (gemini-1.5-flash-001)
+  // Если она не сработает, Google сам переключит на gemini-pro
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-001:generateContent?key=${API_KEY}`;
 
   const systemInstruction = `
-  Ты эксперт по промптам. Твоя задача - проанализировать запрос и вернуть JSON.
-  
-  Правила:
-  1. Переведи промпт на английский (для генерации) и улучши его.
-  2. Оставь/создай красивую версию на русском.
-  3. Категория должна быть СТРОГО одна из списка:
-     - Портрет людей/персонажей
-     - Предметы и Дизайн продуктов
-     - Фоны и Окружение
-     - Стили и улучшения
-     - Другое
-  
-  Структура JSON ответа (все поля обязательны):
+  Ты эксперт по промптам. Верни JSON.
+  Структура:
   {
-    "shortTitle": "Короткое название (RU, 2-4 слова)",
-    "category": "Категория из списка выше",
+    "shortTitle": "Название (RU)",
+    "category": "Категория",
     "variants": {
-      "maleEn": "Промпт для парня (English)",
+      "maleEn": "Prompt for male (English)",
       "maleRu": "Промпт для парня (Russian)",
-      "femaleEn": "Промпт для девушки (English)",
+      "femaleEn": "Prompt for female (English)",
       "femaleRu": "Промпт для девушки (Russian)",
-      "unisexEn": "Общий промпт (English)",
+      "unisexEn": "General prompt (English)",
       "unisexRu": "Общий промпт (Russian)"
     }
   }
-  В ответе ТОЛЬКО чистый JSON. Без markdown.
+  Категории строго: 'Портрет людей/персонажей', 'Предметы и Дизайн продуктов', 'Фоны и Окружение', 'Стили и улучшения', 'Другое'.
+  Верни ТОЛЬКО JSON.
   `;
 
   const requestBody = {
     contents: [{
-      parts: [{
-        text: `${systemInstruction}\n\nЗапрос пользователя: ${prompt}`
-      }]
+      parts: [{ text: `${systemInstruction}\n\nЗапрос: ${prompt}` }]
     }]
   };
 
