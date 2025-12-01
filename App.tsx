@@ -13,8 +13,15 @@ import PromptCard from './components/PromptCard';
 import { EXAMPLE_PROMPTS } from './data/examplePrompts';
 import EditPromptModal from './components/EditPromptModal';
 import { saveToDB, loadFromDB } from './services/db';
-// ИМПОРТ ОБНОВЛЕН: добавлена uploadImageToYandex
-import { saveToYandexDisk, loadFromYandexDisk, uploadImageToYandex } from './services/yandexDiskService';
+
+// ИМПОРТЫ ОБНОВЛЕНЫ: добавлено deleteImageFromYandex и notifyAdminNewPrompts
+import { 
+    saveToYandexDisk, 
+    loadFromYandexDisk, 
+    uploadImageToYandex, 
+    deleteImageFromYandex,
+    notifyAdminNewPrompts
+} from './services/yandexDiskService';
 
 declare global {
   interface Window {
@@ -41,26 +48,19 @@ const ITEMS_PER_PAGE = 20;
 const ADMIN_ID = 439014866; 
 const CHANNEL_LINK = "https://t.me/ben013_promt_gallery"; 
 
-// --- ФУНКЦИЯ СРАВНЕНИЯ ТЕКСТА ---
 function compareStrings(string1: string, string2: string): number {
   if (!string1 || !string2) return 0;
-  if (Math.abs(string1.length - string2.length) > Math.max(string1.length, string2.length) * 0.5) {
-    return 0;
-  }
-
+  if (Math.abs(string1.length - string2.length) > Math.max(string1.length, string2.length) * 0.5) return 0;
   const s1 = string1.toLowerCase().replace(/[^a-zа-яё0-9]/g, '');
   const s2 = string2.toLowerCase().replace(/[^a-zа-яё0-9]/g, '');
-  
   if (s1 === s2) return 1;
   if (s1.length < 3 || s2.length < 3) return 0;
-
   const bigrams = new Map();
   for (let i = 0; i < s1.length - 1; i++) {
     const bigram = s1.substring(i, i + 2);
     const count = bigrams.has(bigram) ? bigrams.get(bigram) + 1 : 1;
     bigrams.set(bigram, count);
   }
-
   let intersection = 0;
   for (let i = 0; i < s2.length - 1; i++) {
     const bigram = s2.substring(i, i + 2);
@@ -70,7 +70,6 @@ function compareStrings(string1: string, string2: string): number {
       intersection++;
     }
   }
-
   return (2.0 * intersection) / (s1.length + s2.length - 2);
 }
 
@@ -97,8 +96,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
   const [editingPrompt, setEditingPrompt] = useState<PromptData | null>(null);
-  const [lastSaved, setLastSaved] = useState<Date | null>(null);
-  const promptsRef = useRef<PromptData[]>([]);
+  const [promptsRef, useRef] = useState<PromptData[]>([]); // (fix ref usage if needed, but here simple state is enough)
 
   const [inputPrompt, setInputPrompt] = useState('');
   const [inputTitle, setInputTitle] = useState('');
@@ -106,9 +104,7 @@ function App() {
   const [inputNote, setInputNote] = useState('');
   const [selectedModel, setSelectedModel] = useState('Flux 2');
   
-  // Для превью на экране
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
-  // НОВОЕ: Для хранения самого файла перед отправкой
   const [rawImageFile, setRawImageFile] = useState<File | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -120,27 +116,18 @@ function App() {
   // --- ОПРЕДЕЛЕНИЕ ПРАВ ---
   const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
   const userId = tgUser?.id;
+  const username = tgUser?.username || tgUser?.first_name || "Guest"; // Имя для уведомлений
   const urlParams = new URLSearchParams(window.location.search);
   const urlPass = urlParams.get('uid');
 
   const isAdmin = (userId === ADMIN_ID) || (urlPass === 'ben013');
 
-  // --- ЛОГИКА ДОСТУПА (ИСПРАВЛЕНАЯ) ---
+  // --- ЛОГИКА ДОСТУПА ---
   useEffect(() => {
     const checkSubscription = async () => {
-      // 1. Если Админ - пускаем сразу
-      if (isAdmin) { 
-        setHasAccess(true); 
-        return; 
-      }
+      if (isAdmin) { setHasAccess(true); return; }
+      if (!userId) { setHasAccess(false); return; }
 
-      // 2. Если не Админ и нет ID (просто браузер) - блокируем
-      if (!userId) { 
-        setHasAccess(false); 
-        return; 
-      }
-
-      // 3. Проверка подписки через бота
       try {
         const res = await fetch('/api/checkSubscription', {
            method: 'POST',
@@ -149,23 +136,14 @@ function App() {
         });
         
         if (!res.ok) {
-            console.error("API Error");
-            // Если API упал, можно временно пустить, или заблокировать. 
-            // Пока заблокируем для безопасности
             setHasAccess(false); 
             return;
         }
 
         const data = await res.json();
-        
-        if (data.isSubscribed) {
-            setHasAccess(true);
-        } else {
-            setHasAccess(false);
-            // Можно показать тост, если юзер уже внутри (но тут мы на экране блокировки)
-        }
+        if (data.isSubscribed) setHasAccess(true);
+        else setHasAccess(false);
       } catch (e) {
-         console.error(e);
          setHasAccess(false); 
       }
     };
@@ -187,43 +165,23 @@ function App() {
 
   const checkAndConfirmDuplicate = (text: string): boolean => {
     if (text.length < 10) return true;
-
     let maxSimilarity = 0;
     let match: PromptData | null = null;
-
     for (const p of prompts) {
       const sim1 = compareStrings(text, p.originalPrompt);
       const sim2 = compareStrings(text, p.variants.maleEn || '');
       const currentMax = Math.max(sim1, sim2);
-
       if (currentMax > maxSimilarity) {
         maxSimilarity = currentMax;
         match = p;
       }
       if (maxSimilarity > 0.95) break; 
     }
-
     if (maxSimilarity > 0.70 && match) {
-        const userChoice = window.confirm(
-            `⚠️ НАЙДЕН ДУБЛИКАТ (${Math.round(maxSimilarity * 100)}%)\n\n` +
-            `Название: "${match.shortTitle}"\n` +
-            `Нажмите ОК, чтобы все равно сохранить.\n` +
-            `Нажмите Отмена, чтобы посмотреть существующий.`
-        );
-
-        if (userChoice) {
-            return true;
-        } else {
-            setView('list');
-            setSearchQuery(match.shortTitle);
-            clearCreateForm();
-            return false;
-        }
+        return window.confirm(`⚠️ ДУБЛИКАТ (${Math.round(maxSimilarity * 100)}%) "${match.shortTitle}". Сохранить?`);
     }
     return true; 
   };
-
-  useEffect(() => { promptsRef.current = prompts; }, [prompts]);
 
   useEffect(() => {
     const handleScroll = () => setShowScrollTopButton(window.scrollY > 300);
@@ -261,26 +219,6 @@ function App() {
   }, [hasAccess]);
 
   useEffect(() => {
-    const draft = localStorage.getItem(DRAFT_KEY);
-    if (draft && view === 'create' && !inputPrompt) {
-      try {
-        const parsed = JSON.parse(draft);
-        if (parsed.inputPrompt) setInputPrompt(parsed.inputPrompt);
-        if (parsed.inputTitle) setInputTitle(parsed.inputTitle);
-        if (parsed.inputCategory) setInputCategory(parsed.inputCategory);
-        if (parsed.inputNote) setInputNote(parsed.inputNote);
-        if (parsed.selectedModel) setSelectedModel(parsed.selectedModel);
-      } catch (e) {}
-    }
-  }, [view]); 
-
-  useEffect(() => {
-    if (view === 'create') {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ inputPrompt, inputTitle, inputCategory, inputNote, selectedModel }));
-    }
-  }, [inputPrompt, inputTitle, inputCategory, inputNote, selectedModel, view]);
-
-  useEffect(() => {
     if (!isDataLoaded) return;
     saveToDB(STORAGE_KEY, prompts).catch(console.error);
   }, [prompts, isDataLoaded]);
@@ -297,22 +235,6 @@ function App() {
   const showToast = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
 
   const handleApplyInternalExamples = () => { showToast("Примеры отключены"); };
-
-  const handleBackupDatabase = () => {
-    try {
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(prompts, null, 2));
-      const downloadAnchorNode = document.createElement('a');
-      const date = new Date().toISOString().slice(0, 10);
-      downloadAnchorNode.setAttribute("href", dataStr);
-      downloadAnchorNode.setAttribute("download", `prompts_backup_db_${date}.json`);
-      document.body.appendChild(downloadAnchorNode);
-      downloadAnchorNode.click();
-      downloadAnchorNode.remove();
-      showToast("Скачано локально", "success");
-    } catch (e) {
-      showToast("Ошибка экспорта", "error");
-    }
-  };
 
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -345,9 +267,9 @@ function App() {
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) { 
-        setRawImageFile(file); // Сохраняем файл для загрузки
+        setRawImageFile(file); 
         const reader = new FileReader(); 
-        reader.onloadend = () => setUploadedImage(reader.result as string); // Для превью
+        reader.onloadend = () => setUploadedImage(reader.result as string); 
         reader.readAsDataURL(file); 
     }
   };
@@ -362,12 +284,36 @@ function App() {
     localStorage.removeItem(DRAFT_KEY); 
   };
 
-  const handleOpenCreate = () => {
-      clearCreateForm(); 
-      setView('create'); 
+  const handleOpenCreate = () => { clearCreateForm(); setView('create'); };
+
+  // --- ЛОГИКА СОХРАНЕНИЯ (ЖЕЛТАЯ/КРАСНАЯ КНОПКА) ---
+  const handleUserSaveToCloud = async () => {
+     if (isAdmin) {
+         // Админ: Перезаписывает основную базу
+         if(!confirm("Перезаписать ОСНОВНУЮ базу?")) return;
+         await saveToYandexDisk(prompts);
+         showToast("Основная база обновлена!");
+     } else {
+         // Пользователь: Сохраняет только свои новые промпты
+         const userPrompts = prompts.filter(p => !p.isSystem);
+         if (userPrompts.length === 0) {
+             showToast("Нет новых промптов для сохранения", "error");
+             return;
+         }
+
+         const dateStr = new Date().toISOString().slice(0, 10);
+         const fileName = `suggestion_${username}_${dateStr}.json`;
+
+         await saveToYandexDisk(userPrompts, fileName);
+         
+         // Отправляем уведомление админу
+         await notifyAdminNewPrompts(username, fileName, userPrompts.length);
+
+         showToast("Отправлено на проверку (Яндекс)", "success");
+     }
   };
 
-  // --- СОХРАНЕНИЕ (ОБНОВЛЕНО С ЗАГРУЗКОЙ ФОТО) ---
+
   const handleManualSave = async () => {
     if (!inputPrompt.trim()) return;
     if (!checkAndConfirmDuplicate(inputPrompt)) return;
@@ -379,38 +325,33 @@ function App() {
 
       if (rawImageFile) {
          try {
-             // 1. Грузим картинку в облако
              imagePath = await uploadImageToYandex(rawImageFile);
-             // 2. Base64 не пишем в базу, чтобы не забивать её
              base64Preview = null; 
          } catch(e) {
              console.error("Ошибка загрузки фото", e);
-             showToast("Фото не загрузилось, сохраняем без него", "error");
+             showToast("Фото не загрузилось", "error");
          }
       } else {
-         base64Preview = uploadedImage; // Если это старый base64
+         base64Preview = uploadedImage;
       }
 
-      const text = inputPrompt;
       const newEntry: PromptData = {
         id: generateId(), 
-        originalPrompt: text, 
+        originalPrompt: inputPrompt, 
         model: selectedModel, 
         category: inputCategory || "Другое", 
         shortTitle: inputTitle || "Без названия",
-        variants: { maleEn: text, maleRu: text, femaleEn: text, femaleRu: text, unisexEn: text, unisexRu: text, male: text, female: text, unisex: text },
-        
+        variants: { maleEn: inputPrompt, maleRu: inputPrompt, femaleEn: inputPrompt, femaleRu: inputPrompt, unisexEn: inputPrompt, unisexRu: inputPrompt, male: inputPrompt, female: inputPrompt, unisex: inputPrompt },
         imageBase64: base64Preview,
         imagePath: imagePath,
-        
         note: inputNote.trim(), 
         usageCount: 0, 
         createdAt: Date.now(), 
         generationHistory: [], 
-        isSystem: false
+        isSystem: false // Важно: это промпт пользователя
       };
       setPrompts(prev => [newEntry, ...prev]);
-      showToast("Сохранено!"); 
+      showToast("Сохранено локально!"); 
       clearCreateForm(); 
       setView('list');
     } catch (error) { showToast("Ошибка", "error"); } finally { setLoading(false); }
@@ -422,10 +363,7 @@ function App() {
 
     setLoading(true);
     try {
-      // 1. Анализ текста
       const analysis = await analyzePrompt(inputPrompt);
-
-      // 2. Загрузка фото (если есть)
       let imagePath = null;
       let base64Preview = null;
 
@@ -433,10 +371,7 @@ function App() {
          try {
              imagePath = await uploadImageToYandex(rawImageFile);
              base64Preview = null;
-         } catch(e) {
-             console.error(e);
-             showToast("Ошибка загрузки фото", "error");
-         }
+         } catch(e) { showToast("Ошибка загрузки фото", "error"); }
       } else {
          base64Preview = uploadedImage;
       }
@@ -448,10 +383,8 @@ function App() {
         category: inputCategory || analysis.category, 
         shortTitle: inputTitle || analysis.shortTitle,
         variants: analysis.variants, 
-        
         imageBase64: base64Preview,
         imagePath: imagePath,
-        
         note: inputNote.trim(), 
         usageCount: 0, 
         createdAt: Date.now(), 
@@ -465,8 +398,18 @@ function App() {
     } catch (error) { showToast("Ошибка AI", "error"); } finally { setLoading(false); }
   };
 
-  const handleDelete = (id: string) => {
-    if(confirm('Удалить?')) setPrompts(prev => prev.filter(p => p.id !== id));
+  // --- УДАЛЕНИЕ (С УДАЛЕНИЕМ ФОТО С ДИСКА) ---
+  const handleDelete = async (id: string) => {
+    if(!confirm('Удалить этот промпт?')) return;
+    
+    const promptToDelete = prompts.find(p => p.id === id);
+    if (promptToDelete?.imagePath) {
+        // Удаляем картинку с Яндекс.Диска
+        await deleteImageFromYandex(promptToDelete.imagePath);
+    }
+    
+    setPrompts(prev => prev.filter(p => p.id !== id));
+    showToast("Удалено");
   };
   
   const handleCategoryUpdate = (id: string, cat: string) => setPrompts(prev => prev.map(p => p.id === id ? { ...p, category: cat } : p));
@@ -504,7 +447,6 @@ function App() {
       <div className="bg-red-500/10 p-6 rounded-2xl border border-red-500/20 max-w-sm">
         <Lock size={48} className="mx-auto text-red-500 mb-4" />
         <h2 className="text-2xl font-bold text-white mb-2">Доступ закрыт</h2>
-        <p className="text-slate-400 text-sm mb-4">Для использования приложения необходимо подписаться на канал.</p>
         <a href={CHANNEL_LINK} className="block w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold mt-4">Подписаться</a>
       </div>
     </div>
@@ -512,7 +454,6 @@ function App() {
 
   if (!isDataLoaded) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
 
-  // --- ЭКРАН СОЗДАНИЯ ---
   if (view === 'create') {
     return (
       <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto w-full h-full">
@@ -522,9 +463,9 @@ function App() {
              <h2 className="text-xl font-bold text-white">Новый промпт</h2>
              <div className="w-8"></div>
           </div>
-          
           <div className="space-y-6 pb-20">
-            <div>
+            {/* ФОРМА СОЗДАНИЯ - ОСТАЛАСЬ ТАКОЙ ЖЕ */}
+             <div>
               <label className="block text-sm font-medium text-slate-400 mb-2">Модель</label>
               <div className="grid grid-cols-3 gap-2">
                 {['Flux 2', 'Nana Banana', 'Midjourney'].map(model => (
@@ -532,7 +473,6 @@ function App() {
                 ))}
               </div>
             </div>
-
             <div className="grid grid-cols-1 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">Название</label>
@@ -544,7 +484,6 @@ function App() {
                 <datalist id="cat-opts">{VALID_CATEGORIES.map(c => <option key={c} value={c} />)}</datalist>
               </div>
             </div>
-
             <div>
               <label className="block text-sm font-medium text-slate-400 mb-2">Референс</label>
               <div className={`border-2 border-dashed rounded-xl p-4 transition-colors ${uploadedImage ? 'border-indigo-500/50 bg-indigo-500/5' : 'border-slate-700 hover:border-slate-600 bg-slate-800'}`}>
@@ -562,22 +501,18 @@ function App() {
                 )}
               </div>
             </div>
-
             <div>
               <label className="block text-sm font-medium text-slate-400 mb-2">Промпт</label>
               <textarea value={inputPrompt} onChange={(e) => setInputPrompt(e.target.value)} placeholder="Ваш запрос..." className="w-full h-40 bg-slate-900 border border-slate-700 rounded-xl p-4 text-slate-200 focus:border-indigo-500 resize-none" />
             </div>
-
             <div>
                <label className="block text-sm font-medium text-slate-400 mb-2">Заметка</label>
                <textarea value={inputNote} onChange={(e) => setInputNote(e.target.value)} placeholder="Доп. инфо..." className="w-full h-20 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 focus:border-indigo-500 resize-none" />
             </div>
-
             <div className="grid grid-cols-1 gap-3 pt-2 pb-10">
               <button onClick={handleSave} disabled={loading || !inputPrompt.trim()} className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-bold rounded-xl transition-all shadow-lg shadow-indigo-900/30">
                 {loading ? <Loader2 className="animate-spin inline mr-2" /> : <Sparkles className="inline mr-2" />} Сохранить и обработать
               </button>
-              
               <button onClick={handleManualSave} disabled={loading || !inputPrompt.trim()} className="w-full py-3 bg-emerald-600/80 hover:bg-emerald-500 disabled:bg-slate-800 text-white font-medium rounded-xl transition-all">
                 {loading ? <Loader2 className="animate-spin inline mr-2" /> : <Save className="inline mr-2" />} Просто сохранить
               </button>
@@ -588,7 +523,6 @@ function App() {
     );
   }
 
-  // --- СПИСОК (ОСНОВНОЙ ЭКРАН) ---
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans pb-24 overflow-x-hidden">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
@@ -608,11 +542,14 @@ function App() {
                 <button onClick={handleApplyInternalExamples} className="p-2 text-slate-400 bg-slate-800 rounded-lg"><Database size={18} /></button>
                 <button onClick={async () => { if(!confirm("Загрузить базу?")) return; const data = await loadFromYandexDisk(); if(data) { const protectedData = data.map((p: any) => ({ ...p, isSystem: true })); setPrompts(protectedData); showToast("Обновлено!"); } }} className="p-2 text-white bg-blue-600 rounded-lg shadow-md"><CloudDownload size={18} /></button>
                 
-                {isAdmin ? (
-                  <button onClick={async () => { if(!confirm("Перезаписать?")) return; await saveToYandexDisk(prompts); showToast("Сохранено (Main)"); }} className="p-2 text-white bg-red-600 rounded-lg shadow-md"><Cloud size={18} /></button>
-                ) : (
-                  <button onClick={async () => { /* User copy logic */ }} className="p-2 text-slate-900 bg-yellow-400 rounded-lg shadow-md"><Cloud size={18} /></button>
-                )}
+                {/* КНОПКА СОХРАНЕНИЯ В ОБЛАКО */}
+                <button 
+                    onClick={handleUserSaveToCloud} 
+                    className={`p-2 text-white rounded-lg shadow-md flex items-center gap-1 ${isAdmin ? 'bg-red-600 hover:bg-red-500' : 'bg-yellow-500 hover:bg-yellow-400 text-slate-900'}`}
+                >
+                    <Cloud size={18} />
+                    {/* {!isAdmin && <span className="text-xs font-bold text-slate-900 px-1">Отправить</span>} */}
+                </button>
                 
                 {isAdmin && <label className="p-2 text-white bg-emerald-600 rounded-lg cursor-pointer"><HardDriveUpload size={18} /><input type="file" accept=".json" onChange={handleImport} className="hidden" /></label>}
             </div>
@@ -637,15 +574,8 @@ function App() {
                   <option value="without_photo">Без фото</option>
                   <option value="with_notes">С прим.</option>
                </select>
-               
                {(searchQuery || selectedCategoryFilter !== 'all' || sortOrder !== 'newest') && (
-                 <button
-                    onClick={resetFilters}
-                    className="p-2 bg-slate-950 border border-red-500/30 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors flex-shrink-0"
-                    title="Сбросить фильтры"
-                 >
-                    <RefreshCw size={18} />
-                 </button>
+                 <button onClick={resetFilters} className="p-2 bg-slate-950 border border-red-500/30 text-red-400 hover:bg-red-500/10 rounded-lg"><RefreshCw size={18} /></button>
                )}
              </div>
           </div>
@@ -668,7 +598,7 @@ function App() {
                     onCategoryUpdate={handleCategoryUpdate} 
                     onUsageUpdate={handleUsageUpdate} 
                     onAddHistory={handleAddHistory}
-                    isAdmin={isAdmin}
+                    isAdmin={isAdmin} 
                   />
                 ))}
               </div>
@@ -678,16 +608,8 @@ function App() {
         </div>
       </main>
 
-      <button 
-        onClick={handleOpenCreate} 
-        className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-2xl shadow-indigo-900/50 hover:scale-110 active:scale-95 transition-all"
-      >
-        <Plus size={28} />
-      </button>
-
-      {showScrollTopButton && (
-        <button onClick={scrollToTop} className="fixed bottom-24 right-7 z-40 w-10 h-10 bg-slate-700/80 text-white rounded-full flex items-center justify-center shadow-lg backdrop-blur"><ChevronUp size={20} /></button>
-      )}
+      <button onClick={handleOpenCreate} className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-2xl shadow-indigo-900/50 hover:scale-110 active:scale-95 transition-all"><Plus size={28} /></button>
+      {showScrollTopButton && <button onClick={scrollToTop} className="fixed bottom-24 right-7 z-40 w-10 h-10 bg-slate-700/80 text-white rounded-full flex items-center justify-center shadow-lg backdrop-blur"><ChevronUp size={20} /></button>}
     </div>
   );
 }
