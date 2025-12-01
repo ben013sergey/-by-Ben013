@@ -13,7 +13,8 @@ import PromptCard from './components/PromptCard';
 import { EXAMPLE_PROMPTS } from './data/examplePrompts';
 import EditPromptModal from './components/EditPromptModal';
 import { saveToDB, loadFromDB } from './services/db';
-import { saveToYandexDisk, loadFromYandexDisk } from './services/yandexDiskService';
+// ИМПОРТ ОБНОВЛЕН: добавлена uploadImageToYandex
+import { saveToYandexDisk, loadFromYandexDisk, uploadImageToYandex } from './services/yandexDiskService';
 
 declare global {
   interface Window {
@@ -43,7 +44,6 @@ const CHANNEL_LINK = "https://t.me/ben013_promt_gallery";
 // --- ФУНКЦИЯ СРАВНЕНИЯ ТЕКСТА ---
 function compareStrings(string1: string, string2: string): number {
   if (!string1 || !string2) return 0;
-  // Оптимизация для мобильных: если длина сильно разная, не тратим ресурсы
   if (Math.abs(string1.length - string2.length) > Math.max(string1.length, string2.length) * 0.5) {
     return 0;
   }
@@ -105,7 +105,11 @@ function App() {
   const [inputCategory, setInputCategory] = useState('');
   const [inputNote, setInputNote] = useState('');
   const [selectedModel, setSelectedModel] = useState('Flux 2');
+  
+  // Для превью на экране
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  // НОВОЕ: Для хранения самого файла перед отправкой
+  const [rawImageFile, setRawImageFile] = useState<File | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
@@ -119,13 +123,12 @@ function App() {
   const urlParams = new URLSearchParams(window.location.search);
   const urlPass = urlParams.get('uid');
 
-  // Админ если: ID совпадает ИЛИ введен пароль в URL
   const isAdmin = (userId === ADMIN_ID) || (urlPass === 'ben013');
 
-  // --- ЛОГИКА ДОСТУПА ---
+  // --- ЛОГИКА ДОСТУПА (ИСПРАВЛЕНАЯ) ---
   useEffect(() => {
     const checkSubscription = async () => {
-      // 1. Если Админ - пускаем сразу (даже если нет ID, но есть пароль)
+      // 1. Если Админ - пускаем сразу
       if (isAdmin) { 
         setHasAccess(true); 
         return; 
@@ -137,8 +140,34 @@ function App() {
         return; 
       }
 
-      // 3. Обычный пользователь в Телеграме - пускаем
-      setHasAccess(true); 
+      // 3. Проверка подписки через бота
+      try {
+        const res = await fetch('/api/checkSubscription', {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ userId: userId })
+        });
+        
+        if (!res.ok) {
+            console.error("API Error");
+            // Если API упал, можно временно пустить, или заблокировать. 
+            // Пока заблокируем для безопасности
+            setHasAccess(false); 
+            return;
+        }
+
+        const data = await res.json();
+        
+        if (data.isSubscribed) {
+            setHasAccess(true);
+        } else {
+            setHasAccess(false);
+            // Можно показать тост, если юзер уже внутри (но тут мы на экране блокировки)
+        }
+      } catch (e) {
+         console.error(e);
+         setHasAccess(false); 
+      }
     };
     checkSubscription();
   }, [userId, isAdmin]);
@@ -156,7 +185,6 @@ function App() {
     }
   }, [view]);
 
-  // --- ПРОВЕРКА ДУБЛИКАТОВ (Порог 70%) ---
   const checkAndConfirmDuplicate = (text: string): boolean => {
     if (text.length < 10) return true;
 
@@ -316,7 +344,12 @@ function App() {
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) { const reader = new FileReader(); reader.onloadend = () => setUploadedImage(reader.result as string); reader.readAsDataURL(file); }
+    if (file) { 
+        setRawImageFile(file); // Сохраняем файл для загрузки
+        const reader = new FileReader(); 
+        reader.onloadend = () => setUploadedImage(reader.result as string); // Для превью
+        reader.readAsDataURL(file); 
+    }
   };
 
   const clearCreateForm = () => {
@@ -325,6 +358,7 @@ function App() {
     setInputCategory(''); 
     setInputNote(''); 
     setUploadedImage(null);
+    setRawImageFile(null);
     localStorage.removeItem(DRAFT_KEY); 
   };
 
@@ -333,17 +367,47 @@ function App() {
       setView('create'); 
   };
 
+  // --- СОХРАНЕНИЕ (ОБНОВЛЕНО С ЗАГРУЗКОЙ ФОТО) ---
   const handleManualSave = async () => {
     if (!inputPrompt.trim()) return;
     if (!checkAndConfirmDuplicate(inputPrompt)) return;
 
     setLoading(true);
     try {
+      let imagePath = null;
+      let base64Preview = null;
+
+      if (rawImageFile) {
+         try {
+             // 1. Грузим картинку в облако
+             imagePath = await uploadImageToYandex(rawImageFile);
+             // 2. Base64 не пишем в базу, чтобы не забивать её
+             base64Preview = null; 
+         } catch(e) {
+             console.error("Ошибка загрузки фото", e);
+             showToast("Фото не загрузилось, сохраняем без него", "error");
+         }
+      } else {
+         base64Preview = uploadedImage; // Если это старый base64
+      }
+
       const text = inputPrompt;
       const newEntry: PromptData = {
-        id: generateId(), originalPrompt: text, model: selectedModel, category: inputCategory || "Другое", shortTitle: inputTitle || "Без названия",
+        id: generateId(), 
+        originalPrompt: text, 
+        model: selectedModel, 
+        category: inputCategory || "Другое", 
+        shortTitle: inputTitle || "Без названия",
         variants: { maleEn: text, maleRu: text, femaleEn: text, femaleRu: text, unisexEn: text, unisexRu: text, male: text, female: text, unisex: text },
-        imageBase64: uploadedImage, note: inputNote.trim(), usageCount: 0, createdAt: Date.now(), generationHistory: [], isSystem: false
+        
+        imageBase64: base64Preview,
+        imagePath: imagePath,
+        
+        note: inputNote.trim(), 
+        usageCount: 0, 
+        createdAt: Date.now(), 
+        generationHistory: [], 
+        isSystem: false
       };
       setPrompts(prev => [newEntry, ...prev]);
       showToast("Сохранено!"); 
@@ -358,10 +422,41 @@ function App() {
 
     setLoading(true);
     try {
+      // 1. Анализ текста
       const analysis = await analyzePrompt(inputPrompt);
+
+      // 2. Загрузка фото (если есть)
+      let imagePath = null;
+      let base64Preview = null;
+
+      if (rawImageFile) {
+         try {
+             imagePath = await uploadImageToYandex(rawImageFile);
+             base64Preview = null;
+         } catch(e) {
+             console.error(e);
+             showToast("Ошибка загрузки фото", "error");
+         }
+      } else {
+         base64Preview = uploadedImage;
+      }
+
       const newEntry: PromptData = {
-        id: generateId(), originalPrompt: inputPrompt, model: selectedModel, category: inputCategory || analysis.category, shortTitle: inputTitle || analysis.shortTitle,
-        variants: analysis.variants, imageBase64: uploadedImage, note: inputNote.trim(), usageCount: 0, createdAt: Date.now(), generationHistory: [], isSystem: false
+        id: generateId(), 
+        originalPrompt: inputPrompt, 
+        model: selectedModel, 
+        category: inputCategory || analysis.category, 
+        shortTitle: inputTitle || analysis.shortTitle,
+        variants: analysis.variants, 
+        
+        imageBase64: base64Preview,
+        imagePath: imagePath,
+        
+        note: inputNote.trim(), 
+        usageCount: 0, 
+        createdAt: Date.now(), 
+        generationHistory: [], 
+        isSystem: false
       };
       setPrompts(prev => [newEntry, ...prev]);
       showToast("Обработано и сохранено!"); 
@@ -389,8 +484,8 @@ function App() {
     return matches && cat;
   }).sort((a, b) => {
     if (sortOrder === 'with_notes') return (a.note ? -1 : 1);
-    if (sortOrder === 'with_photo') return (a.imageBase64 ? -1 : 1);
-    if (sortOrder === 'without_photo') return (!a.imageBase64 ? -1 : 1);
+    if (sortOrder === 'with_photo') return (a.imageBase64 || a.imagePath ? -1 : 1);
+    if (sortOrder === 'without_photo') return (!a.imageBase64 && !a.imagePath ? -1 : 1);
     if (sortOrder === 'oldest') return a.createdAt - b.createdAt;
     return b.createdAt - a.createdAt; 
   });
@@ -404,7 +499,16 @@ function App() {
 
   if (hasAccess === null) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
   
-  if (hasAccess === false) return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-center p-6"><div className="bg-red-500/10 p-6 rounded-2xl border border-red-500/20 max-w-sm"><Lock size={48} className="mx-auto text-red-500 mb-4" /><h2 className="text-2xl font-bold text-white mb-2">Доступ закрыт</h2><a href={CHANNEL_LINK} className="block w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold mt-4">Подписаться</a></div></div>;
+  if (hasAccess === false) return (
+    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-center p-6">
+      <div className="bg-red-500/10 p-6 rounded-2xl border border-red-500/20 max-w-sm">
+        <Lock size={48} className="mx-auto text-red-500 mb-4" />
+        <h2 className="text-2xl font-bold text-white mb-2">Доступ закрыт</h2>
+        <p className="text-slate-400 text-sm mb-4">Для использования приложения необходимо подписаться на канал.</p>
+        <a href={CHANNEL_LINK} className="block w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold mt-4">Подписаться</a>
+      </div>
+    </div>
+  );
 
   if (!isDataLoaded) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
 
@@ -447,7 +551,7 @@ function App() {
                 {uploadedImage ? (
                   <div className="relative group">
                      <img src={uploadedImage} alt="Preview" className="h-48 w-full object-contain rounded-lg" />
-                     <button onClick={() => setUploadedImage(null)} className="absolute top-2 right-2 bg-red-500/80 p-1 rounded-full text-white"><X size={20}/></button>
+                     <button onClick={() => { setUploadedImage(null); setRawImageFile(null); }} className="absolute top-2 right-2 bg-red-500/80 p-1 rounded-full text-white"><X size={20}/></button>
                   </div>
                 ) : (
                   <label className="flex flex-col items-center justify-center cursor-pointer h-24">
@@ -564,7 +668,7 @@ function App() {
                     onCategoryUpdate={handleCategoryUpdate} 
                     onUsageUpdate={handleUsageUpdate} 
                     onAddHistory={handleAddHistory}
-                    isAdmin={isAdmin}  // <--- ВОТ ТУТ МЫ ВЕРНУЛИ ВАЖНУЮ ДЕТАЛЬ
+                    isAdmin={isAdmin}
                   />
                 ))}
               </div>
