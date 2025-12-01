@@ -39,17 +39,22 @@ const ITEMS_PER_PAGE = 20;
 const ADMIN_ID = 439014866; 
 const CHANNEL_LINK = "https://t.me/ben013_promt_gallery"; 
 
-// --- ФУНКЦИЯ СРАВНЕНИЯ ТЕКСТА (Улучшенная) ---
+// --- ФУНКЦИЯ СРАВНЕНИЯ ТЕКСТА (ОПТИМИЗИРОВАННАЯ) ---
 function compareStrings(string1: string, string2: string): number {
   if (!string1 || !string2) return 0;
-  // Жесткая зачистка: только буквы, без пробелов, нижний регистр
+  
+  // 1. Оптимизация: Если длина отличается более чем на 30%, это точно не дубликат
+  // Это предотвращает зависание на телефоне при сравнении длинного текста с короткими
+  if (Math.abs(string1.length - string2.length) > Math.max(string1.length, string2.length) * 0.3) {
+    return 0;
+  }
+
   const s1 = string1.toLowerCase().replace(/[^a-zа-яё0-9]/g, '');
   const s2 = string2.toLowerCase().replace(/[^a-zа-яё0-9]/g, '');
   
   if (s1 === s2) return 1;
   if (s1.length < 3 || s2.length < 3) return 0;
 
-  // Разбиваем на пары символов (биграммы)
   const bigrams = new Map();
   for (let i = 0; i < s1.length - 1; i++) {
     const bigram = s1.substring(i, i + 2);
@@ -129,13 +134,13 @@ function App() {
   // --- ТЕЛЕГРАМ НАСТРОЙКИ ---
   useEffect(() => {
     if (window.Telegram?.WebApp) {
-      window.Telegram.WebApp.expand(); // Разворачиваем на весь экран
+      window.Telegram.WebApp.expand();
       
       if (view === 'create') {
         window.Telegram.WebApp.BackButton.show();
         window.Telegram.WebApp.BackButton.onClick(() => {
             setView('list');
-            clearCreateForm(); // Очищаем форму при выходе
+            clearCreateForm(); 
         });
       } else {
         window.Telegram.WebApp.BackButton.hide();
@@ -143,37 +148,47 @@ function App() {
     }
   }, [view]);
 
-  // --- ПРОВЕРКА ДУБЛИКАТОВ (Порог снижен до 60% для надежности) ---
+  // --- ФУНКЦИЯ ПОИСКА ДУБЛИКАТА ---
+  const checkDuplicateInternal = (text: string): { duplicate: PromptData | null, score: number } => {
+    if (text.length < 10) return { duplicate: null, score: 0 };
+    
+    let maxSimilarity = 0;
+    let match: PromptData | null = null;
+
+    // Проходимся по базе
+    for (const p of prompts) {
+      const sim1 = compareStrings(text, p.originalPrompt);
+      const sim2 = compareStrings(text, p.variants.maleEn || '');
+      const currentMax = Math.max(sim1, sim2);
+
+      if (currentMax > maxSimilarity) {
+        maxSimilarity = currentMax;
+        match = p;
+      }
+      // Если нашли почти 100% совпадение, можно сразу останавливаться
+      if (maxSimilarity > 0.95) break; 
+    }
+    
+    return { duplicate: match, score: maxSimilarity };
+  };
+
+  // --- ЭФФЕКТ ПРОВЕРКИ (ВИЗУАЛЬНО) ---
   useEffect(() => {
-    if (view !== 'create' || inputPrompt.length < 10) {
+    if (view !== 'create' || inputPrompt.length < 15) {
       setShowDuplicateWarning(false);
       return;
     }
 
     const timer = setTimeout(() => {
-      let maxSimilarity = 0;
-      let match: PromptData | null = null;
-
-      prompts.forEach(p => {
-        const sim1 = compareStrings(inputPrompt, p.originalPrompt);
-        // Проверяем еще и английский перевод, вдруг пользователь вводит его
-        const sim2 = compareStrings(inputPrompt, p.variants.maleEn || ''); 
-        const currentMax = Math.max(sim1, sim2);
-
-        if (currentMax > maxSimilarity) {
-          maxSimilarity = currentMax;
-          match = p;
-        }
-      });
-
-      // Порог 0.60 (60%) - чтобы точно поймать
-      if (maxSimilarity > 0.60 && match) {
-        setFoundDuplicate(match);
+      const { duplicate, score } = checkDuplicateInternal(inputPrompt);
+      
+      if (score > 0.60 && duplicate) {
+        setFoundDuplicate(duplicate);
         setShowDuplicateWarning(true);
       } else {
         setShowDuplicateWarning(false);
       }
-    }, 800);
+    }, 1000); // Задержка 1с, чтобы телефон не тормозил при наборе
 
     return () => clearTimeout(timer);
   }, [inputPrompt, prompts, view]);
@@ -227,27 +242,7 @@ function App() {
     loadData();
   }, [hasAccess]);
 
-  // Черновики (Загружаем только если форма пустая)
-  useEffect(() => {
-    const draft = localStorage.getItem(DRAFT_KEY);
-    if (draft && view === 'create' && !inputPrompt) {
-      try {
-        const parsed = JSON.parse(draft);
-        if (parsed.inputPrompt) setInputPrompt(parsed.inputPrompt);
-        if (parsed.inputTitle) setInputTitle(parsed.inputTitle);
-        if (parsed.inputCategory) setInputCategory(parsed.inputCategory);
-        if (parsed.inputNote) setInputNote(parsed.inputNote);
-        if (parsed.selectedModel) setSelectedModel(parsed.selectedModel);
-      } catch (e) {}
-    }
-  }, [view]); // Зависимость от view, чтобы грузить при открытии
-
-  useEffect(() => {
-    if (view === 'create') {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({ inputPrompt, inputTitle, inputCategory, inputNote, selectedModel }));
-    }
-  }, [inputPrompt, inputTitle, inputCategory, inputNote, selectedModel, view]);
-
+  // Автосохранение локально
   useEffect(() => {
     if (!isDataLoaded) return;
     saveToDB(STORAGE_KEY, prompts).catch(console.error);
@@ -317,7 +312,7 @@ function App() {
     if (file) { const reader = new FileReader(); reader.onloadend = () => setUploadedImage(reader.result as string); reader.readAsDataURL(file); }
   };
 
-  // !!! ВАЖНАЯ ФУНКЦИЯ ОЧИСТКИ !!!
+  // Очистка формы
   const clearCreateForm = () => {
     setInputPrompt(''); 
     setInputTitle(''); 
@@ -330,12 +325,21 @@ function App() {
   };
 
   const handleOpenCreate = () => {
-      clearCreateForm(); // Сначала чистим
-      setView('create'); // Потом открываем
+      clearCreateForm(); 
+      setView('create'); 
   };
 
   const handleManualSave = async () => {
     if (!inputPrompt.trim()) return;
+    
+    // ФИНАЛЬНАЯ ПРОВЕРКА НА ДУБЛИКАТЫ ПЕРЕД СОХРАНЕНИЕМ
+    const { duplicate, score } = checkDuplicateInternal(inputPrompt);
+    if (score > 0.60 && duplicate) {
+        if (!confirm(`⚠️ НАЙДЕН ДУБЛИКАТ (${Math.round(score*100)}%)\nПромпт: "${duplicate.shortTitle}"\nВсё равно сохранить?`)) {
+            return;
+        }
+    }
+
     setLoading(true);
     try {
       const text = inputPrompt;
@@ -353,6 +357,15 @@ function App() {
 
   const handleSave = async () => {
     if (!inputPrompt.trim()) return;
+
+    // ФИНАЛЬНАЯ ПРОВЕРКА НА ДУБЛИКАТЫ ПЕРЕД СОХРАНЕНИЕМ
+    const { duplicate, score } = checkDuplicateInternal(inputPrompt);
+    if (score > 0.60 && duplicate) {
+        if (!confirm(`⚠️ НАЙДЕН ДУБЛИКАТ (${Math.round(score*100)}%)\nПромпт: "${duplicate.shortTitle}"\nВсё равно сохранить?`)) {
+            return;
+        }
+    }
+
     setLoading(true);
     try {
       const analysis = await analyzePrompt(inputPrompt);
@@ -405,20 +418,20 @@ function App() {
   if (hasAccess === false) return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-center p-6"><div className="bg-red-500/10 p-6 rounded-2xl border border-red-500/20 max-w-sm"><Lock size={48} className="mx-auto text-red-500 mb-4" /><h2 className="text-2xl font-bold text-white mb-2">Доступ закрыт</h2><a href={CHANNEL_LINK} className="block w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold mt-4">Подписаться</a></div></div>;
   if (!isDataLoaded) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
 
-  // Если мы в режиме создания - показываем ТОЛЬКО форму (на весь экран)
+  // --- ЭКРАН СОЗДАНИЯ (ФИКСИРОВАННЫЙ ОВЕРЛЕЙ) ---
   if (view === 'create') {
     return (
-      <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto">
-        {/* МОДАЛКА ДУБЛИКАТА ПОВЕРХ ВСЕГО */}
+      <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto w-full h-full">
+        {/* МОДАЛКА ДУБЛИКАТА */}
         {showDuplicateWarning && foundDuplicate && (
-          <div className="fixed inset-0 z-[150] bg-black/80 flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
+          <div className="fixed inset-0 z-[150] bg-black/90 flex items-center justify-center p-4">
             <div className="bg-slate-900 border-2 border-yellow-500/50 rounded-2xl p-6 shadow-2xl max-w-lg w-full relative">
               <div className="flex items-center gap-3 text-yellow-400 mb-4">
                 <AlertTriangle size={32} />
                 <h3 className="text-xl font-bold">Найден дубликат!</h3>
               </div>
               <p className="text-slate-300 text-sm mb-4">
-                Похожая запись уже есть (совпадение &gt;60%).
+                Совпадение более 60%. Используйте существующий промпт или продолжите, если уверены.
               </p>
               <div className="opacity-80 pointer-events-none mb-6 transform scale-95 origin-top">
                  <PromptCard data={foundDuplicate} index={0} onDelete={() => {}} onEdit={() => {}} onCategoryUpdate={() => {}} onUsageUpdate={() => {}} onAddHistory={() => {}} />
@@ -577,7 +590,7 @@ function App() {
         </div>
       </main>
 
-      {/* FAB: КНОПКА СОЗДАНИЯ (ВСЕГДА ВИДНА) */}
+      {/* FAB: КНОПКА СОЗДАНИЯ (ВСЕГДА ВИДНА ВНИЗУ) */}
       <button 
         onClick={handleOpenCreate} 
         className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-2xl shadow-indigo-900/50 hover:scale-110 active:scale-95 transition-all"
