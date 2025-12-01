@@ -119,6 +119,7 @@ function App() {
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
 
   const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+  alert("My ID: " + (tgUser?.id || "No ID"));
   const userId = tgUser?.id;
   let username = tgUser?.username || tgUser?.first_name || "Guest";
   
