@@ -12,7 +12,8 @@ export default async function handler(req, res) {
   if (!TOKEN) return res.status(500).json({ error: "Нет токена HF в настройках Vercel" });
 
   // Используем FLUX.1-dev (Лучшее качество на сегодня)
-  const MODEL_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-dev";
+  // --- ИСПРАВЛЕНИЕ: НОВЫЙ URL (router вместо api-inference) ---
+  const MODEL_URL = "https://router.huggingface.co/models/black-forest-labs/FLUX.1-dev";
 
   try {
     const response = await fetch(MODEL_URL, {
