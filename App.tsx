@@ -4,7 +4,7 @@ import {
   ArrowDownUp, XCircle, MessageCircle, FileText, HardDriveDownload, 
   HardDriveUpload, CheckCircle2, AlertCircle, Save, ChevronDown, 
   Trash2, X, Download, RefreshCw, Wand2, Code, Database, ChevronUp, 
-  Send, Cloud, CloudDownload, Lock, Scaling 
+  Send, Cloud, CloudDownload, Lock, Scaling, AlertTriangle 
 } from 'lucide-react';
 
 import { PromptData, VALID_CATEGORIES, GeneratedImage, AspectRatio } from './types';
@@ -30,9 +30,38 @@ declare global {
 const STORAGE_KEY = 'promptvault_data_v1';
 const DRAFT_KEY = 'promptvault_create_draft';
 const ITEMS_PER_PAGE = 20;
-// ВАШ ID (Замените на свой, если он другой)
+// ВАШ ID (Замените на свой)
 const ADMIN_ID = 439014866; 
 const CHANNEL_LINK = "https://t.me/ben013_promt_gallery"; 
+
+// --- ФУНКЦИЯ СРАВНЕНИЯ ТЕКСТА ---
+function compareStrings(string1: string, string2: string): number {
+  if (!string1 || !string2) return 0;
+  const s1 = string1.toLowerCase().replace(/\s+/g, '');
+  const s2 = string2.toLowerCase().replace(/\s+/g, '');
+  
+  if (s1 === s2) return 1;
+  if (s1.length < 2 || s2.length < 2) return 0;
+
+  const bigrams = new Map();
+  for (let i = 0; i < s1.length - 1; i++) {
+    const bigram = s1.substring(i, i + 2);
+    const count = bigrams.has(bigram) ? bigrams.get(bigram) + 1 : 1;
+    bigrams.set(bigram, count);
+  }
+
+  let intersection = 0;
+  for (let i = 0; i < s2.length - 1; i++) {
+    const bigram = s2.substring(i, i + 2);
+    const count = bigrams.has(bigram) ? bigrams.get(bigram) : 0;
+    if (count > 0) {
+      bigrams.set(bigram, count - 1);
+      intersection++;
+    }
+  }
+
+  return (2.0 * intersection) / (s1.length + s2.length - 2);
+}
 
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => (
   <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border animate-in slide-in-from-bottom-5 fade-in duration-300 ${
@@ -68,14 +97,16 @@ function App() {
   const [selectedModel, setSelectedModel] = useState('Flux 2');
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
 
-  // Filters
+  // DUPLICATE CHECK STATE
+  const [foundDuplicate, setFoundDuplicate] = useState<PromptData | null>(null);
+  const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'with_photo' | 'without_photo' | 'with_notes'>('newest');
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
 
-  // --- ПОЛУЧЕНИЕ ЮЗЕРА ---
   const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
   const userId = tgUser?.id;
   let username = tgUser?.username || tgUser?.first_name || "Guest";
@@ -87,24 +118,51 @@ function App() {
   if (userId === ADMIN_ID) isAdmin = true;
   if (urlPass === 'ben013') { isAdmin = true; username = "Admin (Browser)"; }
 
-  // --- ПРОВЕРКА ДОСТУПА ---
+  // --- LOGIC: DUPLICATE CHECK (80%) ---
+  useEffect(() => {
+    if (view !== 'create' || inputPrompt.length < 15) {
+      setShowDuplicateWarning(false);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      let maxSimilarity = 0;
+      let match: PromptData | null = null;
+
+      prompts.forEach(p => {
+        const sim1 = compareStrings(inputPrompt, p.originalPrompt);
+        const sim2 = compareStrings(inputPrompt, p.variants.maleEn || '');
+        const currentMax = Math.max(sim1, sim2);
+
+        if (currentMax > maxSimilarity) {
+          maxSimilarity = currentMax;
+          match = p;
+        }
+      });
+
+      // ПОРОГ ПОВЫШЕН ДО 0.70 (70%)
+      if (maxSimilarity > 0.70 && match) {
+        setFoundDuplicate(match);
+        setShowDuplicateWarning(true);
+      } else {
+        setShowDuplicateWarning(false);
+      }
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [inputPrompt, prompts, view]);
+
+
+  // --- ЭФФЕКТЫ ---
   useEffect(() => {
     const checkSubscription = async () => {
       if (isAdmin) { setHasAccess(true); return; }
-      if (!userId) { setHasAccess(false); return; } // Блокируем браузер без ID
-
-      try {
-        // Здесь можно раскомментировать проверку подписки, если API работает
-        // const res = await fetch('/api/check-sub', ...);
-        setHasAccess(true); // Пока пускаем всех из телеграма
-      } catch (error) {
-        setHasAccess(true); 
-      }
+      if (!userId) { setHasAccess(false); return; } 
+      setHasAccess(true); 
     };
     checkSubscription();
   }, [userId, isAdmin]);
 
-  // --- ЭФФЕКТЫ ---
   useEffect(() => { promptsRef.current = prompts; }, [prompts]);
 
   useEffect(() => {
@@ -143,7 +201,6 @@ function App() {
     loadData();
   }, [hasAccess]);
 
-  // Черновики
   useEffect(() => {
     const draft = localStorage.getItem(DRAFT_KEY);
     if (draft) {
@@ -164,7 +221,6 @@ function App() {
     }
   }, [inputPrompt, inputTitle, inputCategory, inputNote, selectedModel, view]);
 
-  // Автосохранение локально
   useEffect(() => {
     if (!isDataLoaded) return;
     saveToDB(STORAGE_KEY, prompts).catch(console.error);
@@ -184,8 +240,7 @@ function App() {
   // --- ФУНКЦИИ ---
   
   const handleApplyInternalExamples = () => {
-    // Упрощенная версия для примера
-    showToast("Примеры пока отключены для экономии места");
+    showToast("Примеры пока отключены");
   };
 
   const handleBackupDatabase = () => {
@@ -226,7 +281,6 @@ function App() {
       const newMap = new Map(prev.map(p => [p.id, p]));
       importedData.forEach((item: PromptData) => {
         if (!item.id) item.id = generateId();
-        // При импорте ставим isSystem: false, чтобы их можно было редактировать
         newMap.set(item.id, { ...item, isSystem: false }); 
       });
       return Array.from(newMap.values());
@@ -285,7 +339,6 @@ function App() {
 
   // --- ФИЛЬТРАЦИЯ ---
   const allCategories = Array.from(new Set(prompts.map(p => p.category || 'Без категории')));
-  const categoryCounts = prompts.reduce((acc, p) => { const c = p.category || 'Без категории'; acc[c] = (acc[c] || 0) + 1; return acc; }, {} as any);
   
   const allFilteredPrompts = prompts.filter(p => {
     const s = searchQuery.toLowerCase();
@@ -293,12 +346,11 @@ function App() {
     const cat = selectedCategoryFilter === 'all' || p.category === selectedCategoryFilter;
     return matches && cat;
   }).sort((a, b) => {
-    // Ваша логика сортировки
     if (sortOrder === 'with_notes') return (a.note ? -1 : 1);
     if (sortOrder === 'with_photo') return (a.imageBase64 ? -1 : 1);
     if (sortOrder === 'without_photo') return (!a.imageBase64 ? -1 : 1);
     if (sortOrder === 'oldest') return a.createdAt - b.createdAt;
-    return b.createdAt - a.createdAt; // newest
+    return b.createdAt - a.createdAt; 
   });
 
   const visiblePrompts = allFilteredPrompts.slice(0, visibleCount);
@@ -326,6 +378,60 @@ function App() {
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans pb-20 overflow-x-hidden">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       {editingPrompt && <EditPromptModal isOpen={!!editingPrompt} onClose={() => setEditingPrompt(null)} onSave={handleUpdatePrompt} initialData={editingPrompt} />}
+
+      {/* МОДАЛКА: ПРЕДУПРЕЖДЕНИЕ О ДУБЛИКАТЕ */}
+      {showDuplicateWarning && foundDuplicate && (
+        <div className="fixed inset-0 z-[150] bg-black/80 flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
+          <div className="bg-slate-900 border-2 border-yellow-500/50 rounded-2xl p-6 shadow-2xl max-w-lg w-full relative">
+            <div className="flex items-center gap-3 text-yellow-400 mb-4">
+              <AlertTriangle size={32} />
+              <h3 className="text-xl font-bold">Найден похожий промпт!</h3>
+            </div>
+            
+            <p className="text-slate-300 text-sm mb-4">
+              Мы нашли в базе запись, которая более чем на 80% совпадает с вашим текстом. 
+              {isAdmin ? 'Вы Админ, можете продолжить.' : 'Пожалуйста, используйте существующий.'}
+            </p>
+
+            <div className="opacity-80 pointer-events-none mb-6 transform scale-95 origin-top">
+               <PromptCard 
+                 data={foundDuplicate} 
+                 index={0} 
+                 onDelete={() => {}} onEdit={() => {}} 
+                 onCategoryUpdate={() => {}} onUsageUpdate={() => {}} 
+                 onAddHistory={() => {}} 
+               />
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              {/* Кнопка "Игнорировать" только для админа */}
+              {isAdmin && (
+                <button 
+                  onClick={() => {
+                    setShowDuplicateWarning(false);
+                    setFoundDuplicate(null);
+                  }}
+                  className="px-4 py-2 text-slate-400 hover:text-white transition-colors"
+                >
+                  Игнорировать
+                </button>
+              )}
+              
+              <button 
+                onClick={() => {
+                  setShowDuplicateWarning(false);
+                  setFoundDuplicate(null);
+                  setView('list'); 
+                  setSearchQuery(foundDuplicate?.shortTitle || ''); 
+                }}
+                className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg font-bold"
+              >
+                Понятно, показать существующий
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <header className="sticky top-0 z-50 bg-slate-900/80 backdrop-blur-md border-b border-slate-800">
         <div className="max-w-5xl mx-auto px-4 py-4 flex flex-col gap-4">
@@ -397,7 +503,6 @@ function App() {
                   <HardDriveDownload size={18} />
                 </button>
 
-                {/* --- КНОПКА ИМПОРТА (ТОЛЬКО ДЛЯ АДМИНА) --- */}
                 {isAdmin && (
                   <label 
                     className="p-2 text-white bg-emerald-600/50 hover:bg-emerald-500/80 rounded-md transition-all cursor-pointer flex-shrink-0"
@@ -419,7 +524,6 @@ function App() {
             </div>
           </div>
           
-          {/* Поиск и фильтры - АДАПТИРОВАНЫ ДЛЯ МОБИЛЬНЫХ */}
           {view === 'list' && (
              <div className="flex flex-col sm:flex-row gap-2">
                <div className="relative flex-grow">
@@ -449,13 +553,11 @@ function App() {
 
       <main className="max-w-5xl mx-auto px-4 py-8">
         
-        {/* --- ПОЛНАЯ ФОРМА СОЗДАНИЯ (Теперь одинаковая для всех устройств) --- */}
         {view === 'create' && (
           <div className="max-w-2xl mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-xl">
             <h2 className="text-2xl font-bold text-white mb-6">Добавить новый промпт</h2>
             
             <div className="space-y-6">
-              {/* Модель */}
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">Модель нейросети</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -465,7 +567,6 @@ function App() {
                 </div>
               </div>
 
-              {/* Название и Категория */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">Название</label>
@@ -478,7 +579,6 @@ function App() {
                 </div>
               </div>
 
-              {/* Фото */}
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">Референс (Опционально)</label>
                 <div className={`border-2 border-dashed rounded-xl p-4 transition-colors ${uploadedImage ? 'border-indigo-500/50 bg-indigo-500/5' : 'border-slate-700 hover:border-slate-600 bg-slate-800'}`}>
@@ -497,19 +597,16 @@ function App() {
                 </div>
               </div>
 
-              {/* Промпт */}
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">Промпт</label>
                 <textarea value={inputPrompt} onChange={(e) => setInputPrompt(e.target.value)} placeholder="Ваш запрос..." className="w-full h-40 bg-slate-950 border border-slate-700 rounded-xl p-4 text-slate-200 focus:border-indigo-500 resize-none" />
               </div>
 
-              {/* Заметка */}
               <div>
                  <label className="block text-sm font-medium text-slate-400 mb-2">Заметка</label>
                  <textarea value={inputNote} onChange={(e) => setInputNote(e.target.value)} placeholder="Доп. инфо..." className="w-full h-20 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 focus:border-indigo-500 resize-none" />
               </div>
 
-              {/* Кнопки */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
                 <button onClick={handleManualSave} disabled={loading || !inputPrompt.trim()} className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white font-bold rounded-xl transition-all">
                   {loading ? <Loader2 className="animate-spin inline mr-2" /> : <Save className="inline mr-2" />} Сохранить
