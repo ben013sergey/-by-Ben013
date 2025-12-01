@@ -602,7 +602,19 @@ function App() {
             <div className="flex items-center gap-2">
                 <button onClick={handleApplyInternalExamples} className="p-2 text-slate-400 bg-slate-800 rounded-lg"><Database size={18} /></button>
                 <button onClick={async () => { if(!confirm("Загрузить базу?")) return; const data = await loadFromYandexDisk(); if(data) { const protectedData = data.map((p: any) => ({ ...p, isSystem: true })); setPrompts(protectedData); showToast("Обновлено!"); } }} className="p-2 text-white bg-blue-600 rounded-lg shadow-md"><CloudDownload size={18} /></button>
-                
+
+              {/* ВРЕМЕННАЯ КНОПКА МИГРАЦИИ */}
+                {isAdmin && (
+                    <button 
+                        onClick={handleMigrateDatabase} 
+                        disabled={loading}
+                        className="p-2 text-white bg-orange-500 hover:bg-orange-600 rounded-lg shadow-md flex items-center gap-1"
+                        title="Оптимизировать старые картинки"
+                    >
+                        {loading ? <Loader2 size={18} className="animate-spin"/> : <Wand2 size={18} />}
+                    </button>
+                )}
+              
                 {/* КНОПКА СОХРАНЕНИЯ В ОБЛАКО */}
                 <button 
                     onClick={handleUserSaveToCloud} 
