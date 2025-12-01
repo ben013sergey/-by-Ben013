@@ -19,7 +19,8 @@ import {
     loadFromYandexDisk, 
     uploadImageToYandex, 
     deleteImageFromYandex,
-    notifyAdminNewPrompts
+    notifyAdminNewPrompts,
+    getProxyImageUrl // <--- ДОБАВЛЕН ЭТОТ ИМПОРТ
 } from './services/yandexDiskService';
 
 declare global {
@@ -42,9 +43,25 @@ declare global {
 
 const STORAGE_KEY = 'promptvault_data_v1';
 const DRAFT_KEY = 'promptvault_create_draft';
-const ITEMS_PER_PAGE = 20; // Шаг подгрузки
+const ITEMS_PER_PAGE = 20;
 const ADMIN_ID = 439014866; 
 const CHANNEL_LINK = "https://t.me/ben013_promt_gallery"; 
+
+// Вспомогательная функция: Скачивает картинку по ссылке и превращает в Base64
+const urlToBase64 = async (url: string): Promise<string | null> => {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.error("Error converting image to base64:", e);
+    return null;
+  }
+};
 
 function compareStrings(string1: string, string2: string): number {
   if (!string1 || !string2) return 0;
@@ -109,7 +126,6 @@ function App() {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'with_photo' | 'without_photo' | 'with_notes'>('newest');
   
-  // ПАГИНАЦИЯ
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
 
@@ -185,7 +201,6 @@ function App() {
 
   const scrollToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
-  // Сброс пагинации при смене фильтров
   useEffect(() => { setVisibleCount(ITEMS_PER_PAGE); }, [searchQuery, selectedCategoryFilter, sortOrder]);
 
   useEffect(() => {
@@ -228,20 +243,44 @@ function App() {
   const showToast = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
   const handleApplyInternalExamples = () => { showToast("Примеры отключены"); };
 
-  // --- ФУНКЦИЯ СКАЧИВАНИЯ ЛОКАЛЬНОГО БЭКАПА (ВОССТАНОВЛЕНО) ---
-  const handleBackupDatabase = () => {
+  // --- ФУНКЦИЯ ПОЛНОГО БЭКАПА (С КАРТИНКАМИ) ---
+  const handleBackupDatabase = async () => {
+    if (!confirm("Скачать полную базу (с картинками)? Это займет некоторое время.")) return;
+    
+    setLoading(true);
     try {
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(prompts, null, 2));
+      // Создаем копию данных
+      const exportData = JSON.parse(JSON.stringify(prompts));
+      let convertedCount = 0;
+
+      // Проходимся по всем промптам и "вшиваем" картинки обратно
+      for (let p of exportData) {
+          // Если есть ссылка на облако, но нет base64 - скачиваем
+          if (p.imagePath && !p.imageBase64) {
+              const proxyUrl = getProxyImageUrl(p.imagePath);
+              const base64 = await urlToBase64(proxyUrl);
+              if (base64) {
+                  p.imageBase64 = base64; // Вставляем картинку внутрь
+                  convertedCount++;
+              }
+          }
+      }
+
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
       const downloadAnchorNode = document.createElement('a');
       const date = new Date().toISOString().slice(0, 10);
       downloadAnchorNode.setAttribute("href", dataStr);
-      downloadAnchorNode.setAttribute("download", `promptvault_backup_${date}.json`);
+      downloadAnchorNode.setAttribute("download", `promptvault_FULL_backup_${date}.json`);
       document.body.appendChild(downloadAnchorNode);
       downloadAnchorNode.click();
       downloadAnchorNode.remove();
-      showToast("База скачана локально!", "success");
+      
+      showToast(`Скачано! (Вшито ${convertedCount} картинок)`, "success");
     } catch (e) {
+      console.error(e);
       showToast("Ошибка экспорта", "error");
+    } finally {
+        setLoading(false);
     }
   };
 
@@ -402,7 +441,7 @@ function App() {
   
   const resetFilters = () => { setSearchQuery(''); setSelectedCategoryFilter('all'); setSortOrder('newest'); };
 
-  // --- ФИЛЬТРАЦИЯ И СОРТИРОВКА ---
+  // --- ФИЛЬТРАЦИЯ ---
   const allFilteredPrompts = prompts.filter(p => {
     const s = searchQuery.toLowerCase();
     const matches = p.shortTitle.toLowerCase().includes(s) || p.originalPrompt.toLowerCase().includes(s);
@@ -416,7 +455,6 @@ function App() {
     return b.createdAt - a.createdAt; 
   });
 
-  // ПОДСЧЕТ КОЛИЧЕСТВА ПО КАТЕГОРИЯМ
   const categoryCounts = prompts.reduce((acc, p) => {
       const cat = p.category || 'Другое';
       acc[cat] = (acc[cat] || 0) + 1;
@@ -425,7 +463,6 @@ function App() {
 
   const allCategories = Array.from(new Set(prompts.map(p => p.category || 'Без категории'))).sort();
 
-  // ПАГИНАЦИЯ (Slicing)
   const visiblePrompts = allFilteredPrompts.slice(0, visibleCount);
   const groupedPrompts = visiblePrompts.reduce((acc, p) => { 
       const c = p.category || 'Без категории'; 
@@ -435,10 +472,7 @@ function App() {
   }, {} as any);
   const sortedGroupKeys = Object.keys(groupedPrompts).sort();
 
-  // Обработчик кнопки "Показать еще"
-  const handleShowMore = () => {
-      setVisibleCount(prev => prev + ITEMS_PER_PAGE);
-  };
+  const handleShowMore = () => { setVisibleCount(prev => prev + ITEMS_PER_PAGE); };
 
   // --- РЕНДЕРИНГ ---
 
@@ -532,7 +566,6 @@ function App() {
       <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 shadow-md">
         <div className="max-w-5xl mx-auto px-4 py-3 flex flex-col gap-3">
           
-          {/* ШАПКА */}
           <div className="flex justify-between items-start">
             <div className="flex flex-col">
                 <div className="flex items-center gap-2 cursor-pointer" onClick={() => scrollToTop()}>
@@ -548,9 +581,8 @@ function App() {
                 </a>
             </div>
             
-            {/* КНОПКИ В ШАПКЕ С ПОДСКАЗКАМИ */}
             <div className="flex items-center gap-2 mt-1">
-                {/* 1. Сброс к примерам */}
+                {/* КНОПКИ С ПОДСКАЗКАМИ */}
                 <button 
                     onClick={handleApplyInternalExamples} 
                     className="p-2 text-slate-400 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors"
@@ -559,7 +591,6 @@ function App() {
                     <Database size={18} />
                 </button>
 
-                {/* 2. Загрузить из Облака (Яндекс) */}
                 <button 
                     onClick={async () => { if(!confirm("Загрузить базу?")) return; const data = await loadFromYandexDisk(); if(data) { const protectedData = data.map((p: any) => ({ ...p, isSystem: true })); setPrompts(protectedData); showToast("Обновлено!"); } }} 
                     className="p-2 text-white bg-blue-500 hover:bg-blue-400 rounded-lg shadow-md transition-colors"
@@ -568,7 +599,6 @@ function App() {
                     <CloudDownload size={18} />
                 </button>
                 
-                {/* 3. Сохранить в Облако (Желтая/Красная) */}
                 <button 
                     onClick={handleUserSaveToCloud} 
                     className={`p-2 text-white rounded-lg shadow-md flex items-center gap-1 transition-colors ${isAdmin ? 'bg-red-600 hover:bg-red-500' : 'bg-yellow-500 hover:bg-yellow-400 text-slate-900'}`}
@@ -577,7 +607,6 @@ function App() {
                     <Cloud size={18} />
                 </button>
                 
-                {/* 4. Импорт локального файла (Зеленая) */}
                 {isAdmin && (
                     <label 
                         className="p-2 text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg cursor-pointer shadow-md transition-colors"
@@ -588,14 +617,15 @@ function App() {
                     </label>
                 )}
 
-                {/* 5. Скачать базу локально (Синяя) - ВОССТАНОВЛЕННАЯ КНОПКА */}
+                {/* СИНЯЯ КНОПКА СКАЧИВАНИЯ */}
                 {isAdmin && (
                     <button 
                         onClick={handleBackupDatabase}
+                        disabled={loading}
                         className="p-2 text-white bg-blue-700 hover:bg-blue-600 rounded-lg shadow-md transition-colors"
-                        title="Скачать базу данных (.json)"
+                        title="Скачать полную базу с картинками (.json)"
                     >
-                        <HardDriveDownload size={18} />
+                       {loading ? <Loader2 size={18} className="animate-spin" /> : <HardDriveDownload size={18} />}
                     </button>
                 )}
             </div>
@@ -608,7 +638,6 @@ function App() {
                {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 p-1"><XCircle size={14} /></button>}
              </div>
              
-             {/* ФИЛЬТРЫ С КОЛИЧЕСТВОМ */}
              <div className="flex gap-2 w-full overflow-x-auto no-scrollbar">
                <select value={selectedCategoryFilter} onChange={(e) => setSelectedCategoryFilter(e.target.value)} className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-300 flex-grow min-w-[140px]">
                  <option value="all">Все категории ({prompts.length})</option>
@@ -656,7 +685,6 @@ function App() {
           
           {allFilteredPrompts.length === 0 && <div className="text-center text-slate-500 py-10">Ничего не найдено</div>}
 
-          {/* КНОПКА "ПОКАЗАТЬ ЕЩЕ" */}
           {visibleCount < allFilteredPrompts.length && (
             <div className="flex flex-col items-center mt-8 mb-12 gap-2">
                 <button 
