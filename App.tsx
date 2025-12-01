@@ -398,7 +398,68 @@ function App() {
     } catch (error) { showToast("Ошибка AI", "error"); } finally { setLoading(false); }
   };
 
-  // --- УДАЛЕНИЕ (С УДАЛЕНИЕМ ФОТО С ДИСКА) ---
+  // --- ФУНКЦИЯ МИГРАЦИИ (ВРЕМЕННАЯ) ---
+  const handleMigrateDatabase = async () => {
+    if (!isAdmin) return;
+    const oldPrompts = prompts.filter(p => p.imageBase64 && !p.imagePath);
+    
+    if (oldPrompts.length === 0) {
+        showToast("База уже оптимизирована! Нет старых картинок.");
+        return;
+    }
+
+    if (!confirm(`Найдено ${oldPrompts.length} старых картинок. Превратить их в ссылки на Яндекс.Диске? Это займет время.`)) return;
+
+    setLoading(true);
+    let successCount = 0;
+    
+    // Создаем копию массива, чтобы менять её
+    const newPromptsList = [...prompts];
+
+    try {
+      for (const p of oldPrompts) {
+         if (!p.imageBase64) continue;
+
+         try {
+             // 1. Конвертируем Base64 обратно в Файл
+             const fetchRes = await fetch(p.imageBase64);
+             const blob = await fetchRes.blob();
+             const file = new File([blob], `migrated_${p.id}.jpg`, { type: "image/jpeg" });
+
+             // 2. Грузим на Яндекс
+             const newPath = await uploadImageToYandex(file);
+
+             // 3. Обновляем запись в нашем списке (удаляем base64, ставим путь)
+             const index = newPromptsList.findIndex(item => item.id === p.id);
+             if (index !== -1) {
+                 newPromptsList[index] = {
+                     ...newPromptsList[index],
+                     imageBase64: null, // Очищаем тяжелое поле
+                     imagePath: newPath // Записываем легкую ссылку
+                 };
+             }
+             successCount++;
+             console.log(`Мигрировано: ${p.shortTitle}`);
+         } catch (e) {
+             console.error(`Ошибка с промптом ${p.shortTitle}`, e);
+         }
+      }
+
+      // 4. Сохраняем обновленную легкую базу на диск и в приложение
+      setPrompts(newPromptsList);
+      await saveToYandexDisk(newPromptsList);
+      
+      showToast(`Успешно обновлено ${successCount} картинок! База легкая.`, "success");
+
+    } catch (e) {
+        console.error(e);
+        showToast("Ошибка миграции", "error");
+    } finally {
+        setLoading(false);
+    }
+  };
+
+    // --- УДАЛЕНИЕ (С УДАЛЕНИЕМ ФОТО С ДИСКА) ---
   const handleDelete = async (id: string) => {
     if(!confirm('Удалить этот промпт?')) return;
     
