@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { PromptData, VALID_CATEGORIES, AspectRatio, GeneratedImage } from '../types';
-import { Copy, Check, Trash2, Image as ImageIcon, X, Maximize2, Clock, Edit2, Play, Loader2, Upload, Pencil, ZoomIn, ZoomOut, Download, RotateCcw, StickyNote, History, ChevronRight, ChevronDown, Scaling, Languages, Lock } from 'lucide-react'; // Добавил Lock иконку
+import { Copy, Check, Trash2, Image as ImageIcon, X, Maximize2, Clock, Edit2, Play, Loader2, Upload, Pencil, ZoomIn, ZoomOut, Download, RotateCcw, StickyNote, History, ChevronRight, ChevronDown, Scaling, Languages, Lock, Aperture } from 'lucide-react';
 import { generateNanoBananaImage } from '../services/geminiService';
 
 enum GenderVariant {
@@ -8,6 +8,8 @@ enum GenderVariant {
   Female = 'Female',
   Unisex = 'Unisex'
 }
+
+type ModelProvider = 'pollinations' | 'huggingface';
 
 interface PromptCardProps {
   data: PromptData;
@@ -17,7 +19,7 @@ interface PromptCardProps {
   onEdit: (data: PromptData) => void;
   onUsageUpdate: (id: string) => void;
   onAddHistory: (id: string, image: GeneratedImage) => void;
-  isAdmin: boolean; // НОВОЕ: Передаем статус админа
+  isAdmin: boolean;
 }
 
 const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCategoryUpdate, onEdit, onUsageUpdate, onAddHistory, isAdmin }) => {
@@ -30,13 +32,16 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   // Testing State
   const [testReferenceImage, setTestReferenceImage] = useState<string | null>(null);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
-  const [upscale, setUpscale] = useState(false);
+  
+  // НОВОЕ: Выбор модели (по умолчанию Pollinations)
+  const [genModel, setGenModel] = useState<ModelProvider>('pollinations');
+  
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
 
-  // Zoom & Pan
+  // Zoom State
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panPosition, setPanPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -48,17 +53,11 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const [rotateX, setRotateX] = useState(0);
   const [rotateY, setRotateY] = useState(0);
 
-  // ПРОВЕРКА ПРАВ: Можно ли редактировать?
-  // Можно, если: (Я Админ) ИЛИ (Это не системный промпт)
   const canEdit = isAdmin || !data.isSystem;
 
   const getCurrentText = () => {
-    if (activeVariant === GenderVariant.Female) {
-        return showRussian ? (data.variants.femaleRu || data.variants.female) : (data.variants.femaleEn || data.variants.female);
-    }
-    if (activeVariant === GenderVariant.Male) {
-        return showRussian ? (data.variants.maleRu || data.variants.male) : (data.variants.maleEn || data.variants.male);
-    }
+    if (activeVariant === GenderVariant.Female) return showRussian ? (data.variants.femaleRu || data.variants.female) : (data.variants.femaleEn || data.variants.female);
+    if (activeVariant === GenderVariant.Male) return showRussian ? (data.variants.maleRu || data.variants.male) : (data.variants.maleEn || data.variants.male);
     return showRussian ? (data.variants.unisexRu || data.variants.unisex) : (data.variants.unisexEn || data.variants.unisex);
   };
 
@@ -69,7 +68,10 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   };
 
   useEffect(() => {
-    if (!activeModalImage) { setZoomLevel(1); setPanPosition({ x: 0, y: 0 }); }
+    if (!activeModalImage) {
+      setZoomLevel(1);
+      setPanPosition({ x: 0, y: 0 });
+    }
   }, [activeModalImage]);
 
   const handleCopy = () => {
@@ -79,26 +81,44 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   };
 
   const formatDate = (timestamp: number) => {
-    return new Date(timestamp).toLocaleString('ru-RU', {
-      day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-    });
+    return new Date(timestamp).toLocaleString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
   const handleTestGeneration = async () => {
     setIsGenerating(true);
     setGenError(null);
+    setGeneratedImage(null);
+
     try {
       const promptToUse = getGenerationText();
       if (!promptToUse) throw new Error("Промпт пустой");
-      const result = await generateNanoBananaImage(promptToUse, testReferenceImage, aspectRatio, upscale);
+
+      // ПЕРЕДАЕМ ВЫБРАННУЮ МОДЕЛЬ (genModel)
+      const result = await generateNanoBananaImage(promptToUse, testReferenceImage, aspectRatio, genModel);
+      
       setGeneratedImage(result.url);
       onUsageUpdate(data.id);
-      onAddHistory(data.id, { id: Date.now().toString(), url: result.url, timestamp: Date.now(), aspectRatio: aspectRatio });
-      if (!showHistory && (data.generationHistory?.length || 0) > 0) setShowHistory(true);
-    } catch (e: any) { setGenError(e.message || "Ошибка"); } finally { setIsGenerating(false); }
+      
+      const newHistoryItem: GeneratedImage = {
+        id: Date.now().toString(),
+        url: result.url,
+        timestamp: Date.now(),
+        aspectRatio: aspectRatio
+      };
+      onAddHistory(data.id, newHistoryItem);
+      
+      if (!showHistory && (data.generationHistory?.length || 0) > 0) {
+        setShowHistory(true);
+      }
+
+    } catch (e: any) {
+      setGenError(e.message || "Ошибка генерации.");
+    } finally {
+      setIsGenerating(false);
+    }
   };
   
-  // Handlers (Ref, Zoom, etc - same as before)
+  // --- Handlers (Ref, Zoom, etc) ---
   const handleRefUpload = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => setTestReferenceImage(reader.result as string); reader.readAsDataURL(file); }};
   const handleMainImageDownload = (e: React.MouseEvent) => { e.stopPropagation(); if (data.imageBase64) { const link = document.createElement('a'); link.href = data.imageBase64; link.download = `${data.shortTitle}_ref.png`; document.body.appendChild(link); link.click(); document.body.removeChild(link); }};
   const handleCardMouseMove = (e: React.MouseEvent<HTMLDivElement>) => { if (!cardRef.current) return; const rect = cardRef.current.getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top; const centerX = rect.width / 2; const centerY = rect.height / 2; setRotateX(((y - centerY) / centerY) * -3); setRotateY(((x - centerX) / centerX) * 3); };
@@ -150,16 +170,10 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                    {data.isSystem && !isAdmin && <Lock size={14} className="text-slate-500" title="Системный промпт (Только чтение)" />}
                 </div>
               </div>
-              
               <div className="flex items-center gap-1 flex-shrink-0">
                 {canEdit ? (
-                  <>
-                    <button onClick={(e) => { e.stopPropagation(); onEdit(data); }} className="text-slate-500 hover:text-white hover:bg-slate-700 rounded p-1.5 transition-all"><Pencil size={18} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); onDelete(data.id); }} className="text-slate-500 hover:text-red-400 hover:bg-slate-700/50 rounded p-1.5 transition-all"><Trash2 size={18} /></button>
-                  </>
-                ) : (
-                  <span className="text-[10px] text-slate-600 px-2 py-1 border border-slate-700 rounded select-none">ReadOnly</span>
-                )}
+                  <><button onClick={(e) => { e.stopPropagation(); onEdit(data); }} className="text-slate-500 hover:text-white hover:bg-slate-700 rounded p-1.5 transition-all"><Pencil size={18} /></button><button onClick={(e) => { e.stopPropagation(); onDelete(data.id); }} className="text-slate-500 hover:text-red-400 hover:bg-slate-700/50 rounded p-1.5 transition-all"><Trash2 size={18} /></button></>
+                ) : (<span className="text-[10px] text-slate-600 px-2 py-1 border border-slate-700 rounded select-none">ReadOnly</span>)}
               </div>
             </div>
 
@@ -181,21 +195,28 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
               </div>
               <div className="p-3 bg-slate-900/80 flex flex-col gap-3">
                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Тест (Генерация)</div>
-                 <div className="relative group/upload">
+                 <div className="relative group/upload h-24">
                    {testReferenceImage ? (
-                     <div className="relative w-full h-32 rounded-lg overflow-hidden border border-slate-600 bg-black/50"><img src={testReferenceImage} className="w-full h-full object-cover opacity-80" alt="ref" /><button onClick={() => setTestReferenceImage(null)} className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-1 hover:bg-red-500/80"><X size={12} /></button></div>
-                   ) : (<label className="w-full h-24 border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-colors"><Upload size={16} className="text-slate-500 mb-1" /><span className="text-[10px] text-slate-400 text-center px-2">Загрузить фото</span><input type="file" accept="image/*" className="hidden" onChange={handleRefUpload} /></label>)}
+                     <div className="relative w-full h-full rounded-lg overflow-hidden border border-slate-600 bg-black/50"><img src={testReferenceImage} className="w-full h-full object-cover opacity-80" alt="ref" /><button onClick={() => setTestReferenceImage(null)} className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-1 hover:bg-red-500/80"><X size={12} /></button></div>
+                   ) : (<label className="w-full h-full border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-colors"><Upload size={16} className="text-slate-500 mb-1" /><span className="text-[10px] text-slate-400">Фото (опц)</span><input type="file" accept="image/*" className="hidden" onChange={handleRefUpload} /></label>)}
                  </div>
-                 <div className="flex flex-col gap-2 w-full">
-                   <button onClick={handleTestGeneration} disabled={isGenerating} className={`w-full h-10 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${isGenerating ? 'bg-slate-700 text-slate-400' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg'}`}>{isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} fill="currentColor" />} {isGenerating ? 'Wait...' : 'Генерировать'}</button>
-                   <div className="flex gap-2 h-10">
-                      <div className="h-full px-3 bg-slate-800 border border-slate-600 rounded-lg flex items-center justify-center text-xs text-slate-400 font-mono min-w-[40px]">{data.usageCount || 0}</div>
-                      <div className="relative flex-grow h-full">
-                        <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value as AspectRatio)} className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-xs text-slate-300 outline-none">{aspectRatioOptions.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}</select>
-                      </div>
-                      <button onClick={() => setUpscale(!upscale)} className={`h-full aspect-square rounded-lg flex items-center justify-center border transition-all ${upscale ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-600 text-slate-400'}`}><Scaling size={18} /></button>
-                   </div>
+                 <button onClick={handleTestGeneration} disabled={isGenerating} className={`w-full h-10 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${isGenerating ? 'bg-slate-700 text-slate-400' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg'}`}>{isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} fill="currentColor" />} {isGenerating ? 'Wait...' : 'Генерировать'}</button>
+                 
+                 {/* ВЫБОР РАЗМЕРА И МОДЕЛИ */}
+                 <div className="flex gap-2 h-8 w-full">
+                    <div className="relative flex-1">
+                      <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value as AspectRatio)} className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-[10px] text-slate-300 outline-none appearance-none">{aspectRatioOptions.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}</select>
+                      <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"><Scaling size={12} /></div>
+                    </div>
+                    <div className="relative flex-1">
+                      <select value={genModel} onChange={(e) => setGenModel(e.target.value as ModelProvider)} className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-[10px] text-slate-300 outline-none appearance-none">
+                        <option value="pollinations">Fast (Free)</option>
+                        <option value="huggingface">HQ (Flux)</option>
+                      </select>
+                      <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"><Aperture size={12} /></div>
+                    </div>
                  </div>
+
                  {generatedImage && !isGenerating && (<div className="mt-2 animate-in fade-in zoom-in duration-300"><div className="relative w-full h-40 rounded-lg overflow-hidden border border-emerald-500/50 shadow-lg cursor-pointer" onClick={() => setActiveModalImage(generatedImage)}><img src={generatedImage} className="w-full h-full object-cover" alt="Generated" /></div></div>)}
                  {genError && <div className="mt-2 text-xs text-red-400 bg-red-500/10 p-2 rounded border border-red-500/20">{genError}</div>}
               </div>
