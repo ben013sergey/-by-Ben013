@@ -156,7 +156,7 @@ function App() {
     }
   }, [view]);
 
-  // --- ПРОВЕРКА ДУБЛИКАТОВ (Порог 60%) ---
+  // --- ПРОВЕРКА ДУБЛИКАТОВ (Порог 70%) ---
   const checkAndConfirmDuplicate = (text: string): boolean => {
     if (text.length < 10) return true;
 
@@ -175,7 +175,7 @@ function App() {
       if (maxSimilarity > 0.95) break; 
     }
 
-    if (maxSimilarity > 0.60 && match) {
+    if (maxSimilarity > 0.70 && match) {
         const userChoice = window.confirm(
             `⚠️ НАЙДЕН ДУБЛИКАТ (${Math.round(maxSimilarity * 100)}%)\n\n` +
             `Название: "${match.shortTitle}"\n` +
