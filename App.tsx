@@ -39,17 +39,22 @@ const ITEMS_PER_PAGE = 20;
 const ADMIN_ID = 439014866; 
 const CHANNEL_LINK = "https://t.me/ben013_promt_gallery"; 
 
-// --- ФУНКЦИЯ СРАВНЕНИЯ (Оставляем только для финальной проверки) ---
+// --- ФУНКЦИЯ СРАВНЕНИЯ ТЕКСТА (ОПТИМИЗИРОВАННАЯ) ---
 function compareStrings(string1: string, string2: string): number {
   if (!string1 || !string2) return 0;
-  // Быстрая проверка длины
+  
+  // 1. Оптимизация: Если длина отличается более чем на 30%, это точно не дубликат
   if (Math.abs(string1.length - string2.length) > Math.max(string1.length, string2.length) * 0.3) {
     return 0;
   }
+
+  // 2. Жесткая чистка: оставляем только буквы и цифры (убираем пробелы, знаки)
   const s1 = string1.toLowerCase().replace(/[^a-zа-яё0-9]/g, '');
   const s2 = string2.toLowerCase().replace(/[^a-zа-яё0-9]/g, '');
+  
   if (s1 === s2) return 1;
-  if (s1.length < 3 || s2.length < 3) return 0;
+  // Если после чистки строки слишком короткие, не сравниваем
+  if (s1.length < 5 || s2.length < 5) return 0;
 
   const bigrams = new Map();
   for (let i = 0; i < s1.length - 1; i++) {
@@ -57,6 +62,7 @@ function compareStrings(string1: string, string2: string): number {
     const count = bigrams.has(bigram) ? bigrams.get(bigram) + 1 : 1;
     bigrams.set(bigram, count);
   }
+
   let intersection = 0;
   for (let i = 0; i < s2.length - 1; i++) {
     const bigram = s2.substring(i, i + 2);
@@ -66,6 +72,7 @@ function compareStrings(string1: string, string2: string): number {
       intersection++;
     }
   }
+
   return (2.0 * intersection) / (s1.length + s2.length - 2);
 }
 
@@ -103,6 +110,11 @@ function App() {
   const [selectedModel, setSelectedModel] = useState('Flux 2');
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
 
+  // Duplicate Check
+  const [foundDuplicate, setFoundDuplicate] = useState<PromptData | null>(null);
+  const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
+  const [forceSave, setForceSave] = useState(false); 
+
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
@@ -125,14 +137,40 @@ function App() {
   useEffect(() => {
     if (window.Telegram?.WebApp) {
       window.Telegram.WebApp.expand();
+      
       if (view === 'create') {
         window.Telegram.WebApp.BackButton.show();
-        window.Telegram.WebApp.BackButton.onClick(() => { setView('list'); clearCreateForm(); });
+        window.Telegram.WebApp.BackButton.onClick(() => {
+            setView('list');
+            clearCreateForm(); 
+        });
       } else {
         window.Telegram.WebApp.BackButton.hide();
       }
     }
   }, [view]);
+
+  // --- ЛОГИКА ПОИСКА ДУБЛИКАТА ---
+  const checkDuplicateInternal = (text: string): { duplicate: PromptData | null, score: number } => {
+    if (text.length < 15) return { duplicate: null, score: 0 };
+    
+    let maxSimilarity = 0;
+    let match: PromptData | null = null;
+
+    for (const p of prompts) {
+      const sim1 = compareStrings(text, p.originalPrompt);
+      const sim2 = compareStrings(text, p.variants.maleEn || '');
+      const currentMax = Math.max(sim1, sim2);
+
+      if (currentMax > maxSimilarity) {
+        maxSimilarity = currentMax;
+        match = p;
+      }
+      if (maxSimilarity > 0.98) break; // Почти полное совпадение
+    }
+    
+    return { duplicate: match, score: maxSimilarity };
+  };
 
   // --- ЭФФЕКТЫ ---
   useEffect(() => {
@@ -157,10 +195,12 @@ function App() {
   // Загрузка
   useEffect(() => {
     if (hasAccess !== true) return;
+
     const loadData = async () => {
       setIsDataLoaded(false); 
       try {
         const cloudData = await loadFromYandexDisk();
+        
         if (cloudData && Array.isArray(cloudData) && cloudData.length > 0) {
           const protectedData = cloudData.map((p: any) => ({ ...p, isSystem: true }));
           setPrompts(protectedData);
@@ -180,6 +220,7 @@ function App() {
     loadData();
   }, [hasAccess]);
 
+  // Черновики (Загружаем только если форма пустая)
   useEffect(() => {
     const draft = localStorage.getItem(DRAFT_KEY);
     if (draft && view === 'create' && !inputPrompt) {
@@ -270,8 +311,15 @@ function App() {
   };
 
   const clearCreateForm = () => {
-    setInputPrompt(''); setInputTitle(''); setInputCategory(''); setInputNote(''); setUploadedImage(null);
+    setInputPrompt(''); 
+    setInputTitle(''); 
+    setInputCategory(''); 
+    setInputNote(''); 
+    setUploadedImage(null);
     localStorage.removeItem(DRAFT_KEY); 
+    setFoundDuplicate(null);
+    setShowDuplicateWarning(false);
+    setForceSave(false);
   };
 
   const handleOpenCreate = () => {
@@ -279,35 +327,24 @@ function App() {
       setView('create'); 
   };
 
-  // ФУНКЦИЯ ПРОВЕРКИ (Вызывается ТОЛЬКО при сохранении)
-  const checkForDuplicates = (): boolean => {
-    if (inputPrompt.length < 15) return false;
-    let maxSimilarity = 0;
-    let match: PromptData | null = null;
+  // --- ФУНКЦИЯ ДЛЯ КНОПОК СОХРАНЕНИЯ (Проверка дублей) ---
+  const validateBeforeSave = (): boolean => {
+    if (forceSave) return true; // Если админ уже нажал "Игнорировать", пропускаем
 
-    for (const p of prompts) {
-      const sim1 = compareStrings(inputPrompt, p.originalPrompt);
-      const sim2 = compareStrings(inputPrompt, p.variants.maleEn || '');
-      const currentMax = Math.max(sim1, sim2);
-      if (currentMax > maxSimilarity) {
-        maxSimilarity = currentMax;
-        match = p;
-      }
-      if (maxSimilarity > 0.95) break; 
+    const { duplicate, score } = checkDuplicateInternal(inputPrompt);
+    
+    // Порог 0.60 (60%)
+    if (score > 0.60 && duplicate) {
+      setFoundDuplicate(duplicate);
+      setShowDuplicateWarning(true);
+      return false; // Блокируем сохранение, показываем окно
     }
-
-    if (maxSimilarity > 0.70 && match) {
-       return confirm(`⚠️ ВНИМАНИЕ! \nНайден похожий промпт (${Math.round(maxSimilarity*100)}% совпадения):\n"${match.shortTitle}"\n\nВы уверены, что хотите создать дубликат?`);
-    }
-    return true; // Нет дубликатов или пользователь согласился
+    return true;
   };
 
   const handleManualSave = async () => {
     if (!inputPrompt.trim()) return;
-    
-    // ПРОВЕРКА ПЕРЕД СОХРАНЕНИЕМ (Один раз, быстро)
-    const canProceed = checkForDuplicates();
-    if (!canProceed) return;
+    if (!validateBeforeSave()) return;
 
     setLoading(true);
     try {
@@ -326,10 +363,7 @@ function App() {
 
   const handleSave = async () => {
     if (!inputPrompt.trim()) return;
-
-    // ПРОВЕРКА ПЕРЕД СОХРАНЕНИЕМ
-    const canProceed = checkForDuplicates();
-    if (!canProceed) return;
+    if (!validateBeforeSave()) return;
 
     setLoading(true);
     try {
@@ -387,6 +421,49 @@ function App() {
   if (view === 'create') {
     return (
       <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto w-full h-full">
+        {/* МОДАЛКА ДУБЛИКАТА */}
+        {showDuplicateWarning && foundDuplicate && (
+          <div className="fixed inset-0 z-[150] bg-black/90 flex items-center justify-center p-4">
+            <div className="bg-slate-900 border-2 border-yellow-500/50 rounded-2xl p-6 shadow-2xl max-w-lg w-full relative">
+              <div className="flex items-center gap-3 text-yellow-400 mb-4">
+                <AlertTriangle size={32} />
+                <h3 className="text-xl font-bold">Найден дубликат!</h3>
+              </div>
+              <p className="text-slate-300 text-sm mb-4">
+                Совпадение более 60%. Используйте существующий или продолжите (для админа).
+              </p>
+              <div className="opacity-80 pointer-events-none mb-6 transform scale-95 origin-top">
+                 <PromptCard data={foundDuplicate} index={0} onDelete={() => {}} onEdit={() => {}} onCategoryUpdate={() => {}} onUsageUpdate={() => {}} onAddHistory={() => {}} />
+              </div>
+              <div className="flex gap-3 justify-end">
+                {isAdmin && (
+                  <button 
+                    onClick={() => { 
+                      setShowDuplicateWarning(false); 
+                      setForceSave(true); // Разрешаем сохранение для след. нажатия
+                    }} 
+                    className="px-4 py-2 text-slate-400 hover:text-white transition-colors"
+                  >
+                    Игнорировать
+                  </button>
+                )}
+                <button 
+                  onClick={() => { 
+                    setShowDuplicateWarning(false); 
+                    setFoundDuplicate(null); 
+                    // Переход к найденному
+                    setView('list'); 
+                    setSearchQuery(foundDuplicate.shortTitle || ''); 
+                  }} 
+                  className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg font-bold"
+                >
+                  Показать существующий
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="max-w-2xl mx-auto p-4 min-h-screen">
           <div className="flex items-center justify-between mb-6 sticky top-0 bg-slate-950/95 backdrop-blur py-2 z-10">
              <button onClick={() => setView('list')} className="p-2 -ml-2 text-slate-400 hover:text-white"><ArrowLeft size={24} /></button>
