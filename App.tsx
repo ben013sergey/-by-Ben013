@@ -4,7 +4,7 @@ import {
   ArrowDownUp, XCircle, MessageCircle, FileText, HardDriveDownload, 
   HardDriveUpload, CheckCircle2, AlertCircle, Save, ChevronDown, 
   Trash2, X, Download, RefreshCw, Wand2, Code, Database, ChevronUp, 
-  Send, Cloud, CloudDownload, Lock, Scaling, AlertTriangle 
+  Send, Cloud, CloudDownload, Lock, Scaling, AlertTriangle, ArrowLeft 
 } from 'lucide-react';
 
 import { PromptData, VALID_CATEGORIES, GeneratedImage, AspectRatio } from './types';
@@ -22,6 +22,11 @@ declare global {
         sendData: (data: string) => void;
         initDataUnsafe: any;
         openTelegramLink: (url: string) => void;
+        BackButton: {
+            show: () => void;
+            hide: () => void;
+            onClick: (cb: () => void) => void;
+        }
       }
     }
   }
@@ -30,15 +35,15 @@ declare global {
 const STORAGE_KEY = 'promptvault_data_v1';
 const DRAFT_KEY = 'promptvault_create_draft';
 const ITEMS_PER_PAGE = 20;
-// ВАШ ID (Замените на свой)
 const ADMIN_ID = 439014866; 
 const CHANNEL_LINK = "https://t.me/ben013_promt_gallery"; 
 
-// --- ФУНКЦИЯ СРАВНЕНИЯ ТЕКСТА ---
+// --- УЛУЧШЕННАЯ ФУНКЦИЯ СРАВНЕНИЯ ---
 function compareStrings(string1: string, string2: string): number {
   if (!string1 || !string2) return 0;
-  const s1 = string1.toLowerCase().replace(/\s+/g, '');
-  const s2 = string2.toLowerCase().replace(/\s+/g, '');
+  // Убираем всё кроме букв и цифр, приводим к нижнему регистру
+  const s1 = string1.toLowerCase().replace(/[^a-zа-яё0-9]/g, '');
+  const s2 = string2.toLowerCase().replace(/[^a-zа-яё0-9]/g, '');
   
   if (s1 === s2) return 1;
   if (s1.length < 2 || s2.length < 2) return 0;
@@ -64,7 +69,7 @@ function compareStrings(string1: string, string2: string): number {
 }
 
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => (
-  <div className={`fixed bottom-6 right-6 z-[100] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border animate-in slide-in-from-bottom-5 fade-in duration-300 ${
+  <div className={`fixed bottom-6 right-6 z-[200] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border animate-in slide-in-from-bottom-5 fade-in duration-300 ${
     type === 'success' ? 'bg-slate-800 border-green-500/30 text-green-400' : 'bg-slate-800 border-red-500/30 text-red-400'
   }`}>
     {type === 'success' ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
@@ -97,10 +102,11 @@ function App() {
   const [selectedModel, setSelectedModel] = useState('Flux 2');
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
 
-  // DUPLICATE CHECK STATE
+  // Duplicate Check
   const [foundDuplicate, setFoundDuplicate] = useState<PromptData | null>(null);
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
 
+  // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'with_photo' | 'without_photo' | 'with_notes'>('newest');
@@ -118,9 +124,21 @@ function App() {
   if (userId === ADMIN_ID) isAdmin = true;
   if (urlPass === 'ben013') { isAdmin = true; username = "Admin (Browser)"; }
 
-  // --- LOGIC: DUPLICATE CHECK (80%) ---
+  // --- ТЕЛЕГРАМ КНОПКА НАЗАД ---
   useEffect(() => {
-    if (view !== 'create' || inputPrompt.length < 15) {
+    if (window.Telegram?.WebApp?.BackButton) {
+      if (view === 'create') {
+        window.Telegram.WebApp.BackButton.show();
+        window.Telegram.WebApp.BackButton.onClick(() => setView('list'));
+      } else {
+        window.Telegram.WebApp.BackButton.hide();
+      }
+    }
+  }, [view]);
+
+  // --- ПРОВЕРКА ДУБЛИКАТОВ (Порог 70%) ---
+  useEffect(() => {
+    if (view !== 'create' || inputPrompt.length < 10) {
       setShowDuplicateWarning(false);
       return;
     }
@@ -140,14 +158,14 @@ function App() {
         }
       });
 
-      // ПОРОГ ПОВЫШЕН ДО 0.70 (70%)
+      // Порог 0.7 (70%)
       if (maxSimilarity > 0.70 && match) {
         setFoundDuplicate(match);
         setShowDuplicateWarning(true);
       } else {
         setShowDuplicateWarning(false);
       }
-    }, 800);
+    }, 1000);
 
     return () => clearTimeout(timer);
   }, [inputPrompt, prompts, view]);
@@ -173,7 +191,7 @@ function App() {
 
   const scrollToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
-  // Загрузка данных
+  // Загрузка
   useEffect(() => {
     if (hasAccess !== true) return;
 
@@ -201,6 +219,7 @@ function App() {
     loadData();
   }, [hasAccess]);
 
+  // Черновики
   useEffect(() => {
     const draft = localStorage.getItem(DRAFT_KEY);
     if (draft) {
@@ -239,9 +258,7 @@ function App() {
 
   // --- ФУНКЦИИ ---
   
-  const handleApplyInternalExamples = () => {
-    showToast("Примеры пока отключены");
-  };
+  const handleApplyInternalExamples = () => { showToast("Примеры пока отключены"); };
 
   const handleBackupDatabase = () => {
     try {
@@ -361,17 +378,7 @@ function App() {
   // --- РЕНДЕРИНГ ---
 
   if (hasAccess === null) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
-  
-  if (hasAccess === false) return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-center p-6">
-        <div className="bg-red-500/10 p-6 rounded-2xl border border-red-500/20 max-w-sm">
-          <Lock size={48} className="mx-auto text-red-500 mb-4" />
-          <h2 className="text-2xl font-bold text-white mb-2">Доступ закрыт</h2>
-          <a href={CHANNEL_LINK} className="block w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold mt-4">Подписаться</a>
-        </div>
-      </div>
-  );
-
+  if (hasAccess === false) return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-center p-6"><div className="bg-red-500/10 p-6 rounded-2xl border border-red-500/20 max-w-sm"><Lock size={48} className="mx-auto text-red-500 mb-4" /><h2 className="text-2xl font-bold text-white mb-2">Доступ закрыт</h2><a href={CHANNEL_LINK} className="block w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold mt-4">Подписаться</a></div></div>;
   if (!isDataLoaded) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
 
   return (
@@ -379,7 +386,7 @@ function App() {
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       {editingPrompt && <EditPromptModal isOpen={!!editingPrompt} onClose={() => setEditingPrompt(null)} onSave={handleUpdatePrompt} initialData={editingPrompt} />}
 
-      {/* МОДАЛКА: ПРЕДУПРЕЖДЕНИЕ О ДУБЛИКАТЕ */}
+      {/* МОДАЛКА: ПРЕДУПРЕЖДЕНИЕ О ДУБЛИКАТЕ (Z-INDEX 150) */}
       {showDuplicateWarning && foundDuplicate && (
         <div className="fixed inset-0 z-[150] bg-black/80 flex items-center justify-center p-4 animate-in fade-in zoom-in duration-200">
           <div className="bg-slate-900 border-2 border-yellow-500/50 rounded-2xl p-6 shadow-2xl max-w-lg w-full relative">
@@ -387,52 +394,21 @@ function App() {
               <AlertTriangle size={32} />
               <h3 className="text-xl font-bold">Найден похожий промпт!</h3>
             </div>
-            
             <p className="text-slate-300 text-sm mb-4">
-              Мы нашли в базе запись, которая более чем на 80% совпадает с вашим текстом. 
-              {isAdmin ? 'Вы Админ, можете продолжить.' : 'Пожалуйста, используйте существующий.'}
+              Совпадение более 70%. {isAdmin ? 'Вы Админ, можете продолжить.' : 'Пожалуйста, используйте существующий.'}
             </p>
-
             <div className="opacity-80 pointer-events-none mb-6 transform scale-95 origin-top">
-               <PromptCard 
-                 data={foundDuplicate} 
-                 index={0} 
-                 onDelete={() => {}} onEdit={() => {}} 
-                 onCategoryUpdate={() => {}} onUsageUpdate={() => {}} 
-                 onAddHistory={() => {}} 
-               />
+               <PromptCard data={foundDuplicate} index={0} onDelete={() => {}} onEdit={() => {}} onCategoryUpdate={() => {}} onUsageUpdate={() => {}} onAddHistory={() => {}} />
             </div>
-
             <div className="flex gap-3 justify-end">
-              {/* Кнопка "Игнорировать" только для админа */}
-              {isAdmin && (
-                <button 
-                  onClick={() => {
-                    setShowDuplicateWarning(false);
-                    setFoundDuplicate(null);
-                  }}
-                  className="px-4 py-2 text-slate-400 hover:text-white transition-colors"
-                >
-                  Игнорировать
-                </button>
-              )}
-              
-              <button 
-                onClick={() => {
-                  setShowDuplicateWarning(false);
-                  setFoundDuplicate(null);
-                  setView('list'); 
-                  setSearchQuery(foundDuplicate?.shortTitle || ''); 
-                }}
-                className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg font-bold"
-              >
-                Понятно, показать существующий
-              </button>
+              {isAdmin && <button onClick={() => { setShowDuplicateWarning(false); setFoundDuplicate(null); }} className="px-4 py-2 text-slate-400 hover:text-white transition-colors">Игнорировать</button>}
+              <button onClick={() => { setShowDuplicateWarning(false); setFoundDuplicate(null); setView('list'); setSearchQuery(foundDuplicate?.shortTitle || ''); }} className="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg font-bold">Понятно, показать</button>
             </div>
           </div>
         </div>
       )}
 
+      {/* ШАПКА ПРИЛОЖЕНИЯ */}
       <header className="sticky top-0 z-50 bg-slate-900/80 backdrop-blur-md border-b border-slate-800">
         <div className="max-w-5xl mx-auto px-4 py-4 flex flex-col gap-4">
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
@@ -442,122 +418,84 @@ function App() {
             </div>
             
             <div className="flex items-center gap-2 overflow-x-auto max-w-full no-scrollbar pb-1">
-                <button 
-                  onClick={handleApplyInternalExamples}
-                  className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-slate-700/80 rounded-md transition-all relative flex-shrink-0"
-                  title="Применить примеры"
-                >
-                  <Database size={18} />
-                </button>
-
+                {/* --- КНОПКИ УПРАВЛЕНИЯ БАЗОЙ --- */}
+                <button onClick={handleApplyInternalExamples} className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-slate-700/80 rounded-md transition-all relative flex-shrink-0" title="Применить примеры"><Database size={18} /></button>
                 <div className="w-px h-6 bg-slate-700 mx-1 flex-shrink-0"></div>
-
-                <button 
-                  onClick={async () => {
-                    if(!confirm("Загрузить базу с Яндекса?")) return;
-                    const data = await loadFromYandexDisk();
-                    if(data) {
-                       const protectedData = data.map((p: any) => ({ ...p, isSystem: true }));
-                       setPrompts(protectedData);
-                       showToast("База обновлена!");
-                    }
-                  }}
-                  className="p-2 text-white bg-blue-600 hover:bg-blue-500 rounded-md shadow-md flex-shrink-0"
-                >
-                  <CloudDownload size={18} />
-                </button>
+                
+                <button onClick={async () => { if(!confirm("Загрузить базу с Яндекса?")) return; const data = await loadFromYandexDisk(); if(data) { const protectedData = data.map((p: any) => ({ ...p, isSystem: true })); setPrompts(protectedData); showToast("База обновлена!"); } }} className="p-2 text-white bg-blue-600 hover:bg-blue-500 rounded-md shadow-md flex-shrink-0"><CloudDownload size={18} /></button>
 
                 {isAdmin ? (
-                  <button 
-                    onClick={async () => {
-                      if(!confirm("Перезаписать базу на Яндексе?")) return;
-                      await saveToYandexDisk(prompts);
-                      showToast("✅ База обновлена (Main)");
-                    }}
-                    className="p-2 flex items-center gap-1 text-white bg-red-600 hover:bg-red-500 rounded-md shadow-md flex-shrink-0"
-                  >
-                    <Cloud size={18} /><span className="text-[10px] font-bold">MAIN</span>
-                  </button>
+                  <button onClick={async () => { if(!confirm("Перезаписать базу на Яндексе?")) return; await saveToYandexDisk(prompts); showToast("✅ База обновлена (Main)"); }} className="p-2 flex items-center gap-1 text-white bg-red-600 hover:bg-red-500 rounded-md shadow-md flex-shrink-0"><Cloud size={18} /><span className="text-[10px] font-bold">MAIN</span></button>
                 ) : (
-                  <button 
-                    onClick={async () => {
-                      const userPrompts = prompts.filter(p => p.isSystem === false);
-                      if (userPrompts.length === 0) { showToast("Нет новых промптов", "error"); return; }
-                      const safeName = `suggestion_${username}_${new Date().toISOString().slice(0,10)}.json`;
-                      await saveToYandexDisk(userPrompts, safeName);
-                      showToast("✅ Копия отправлена админу!");
-                    }}
-                    className="p-2 flex items-center gap-1 text-slate-900 bg-yellow-400 hover:bg-yellow-300 rounded-md shadow-md flex-shrink-0"
-                  >
-                    <Cloud size={18} /><span className="text-[10px] font-bold">COPY</span>
-                  </button>
+                  <button onClick={async () => { const userPrompts = prompts.filter(p => p.isSystem === false); if (userPrompts.length === 0) { showToast("Нет новых промптов", "error"); return; } const safeName = `suggestion_${username}_${new Date().toISOString().slice(0,10)}.json`; await saveToYandexDisk(userPrompts, safeName); showToast("✅ Копия отправлена админу!"); }} className="p-2 flex items-center gap-1 text-slate-900 bg-yellow-400 hover:bg-yellow-300 rounded-md shadow-md flex-shrink-0"><Cloud size={18} /><span className="text-[10px] font-bold">COPY</span></button>
                 )}
 
                 <div className="w-px h-6 bg-slate-700 mx-1 flex-shrink-0"></div>
-
-                <button 
-                  onClick={handleBackupDatabase}
-                  className="p-2 text-white bg-slate-700 hover:bg-slate-600 rounded-md transition-all flex-shrink-0"
-                  title="Скачать JSON локально"
-                >
-                  <HardDriveDownload size={18} />
-                </button>
-
-                {isAdmin && (
-                  <label 
-                    className="p-2 text-white bg-emerald-600/50 hover:bg-emerald-500/80 rounded-md transition-all cursor-pointer flex-shrink-0"
-                    title="Импорт из файла"
-                  >
-                    <HardDriveUpload size={18} />
-                    <input type="file" accept=".json" onChange={handleImport} className="hidden" />
-                  </label>
-                )}
-
+                <button onClick={handleBackupDatabase} className="p-2 text-white bg-slate-700 hover:bg-slate-600 rounded-md transition-all flex-shrink-0" title="Скачать JSON локально"><HardDriveDownload size={18} /></button>
+                {isAdmin && <label className="p-2 text-white bg-emerald-600/50 hover:bg-emerald-500/80 rounded-md transition-all cursor-pointer flex-shrink-0" title="Импорт"><HardDriveUpload size={18} /><input type="file" accept=".json" onChange={handleImport} className="hidden" /></label>}
+                
                 <div className="w-px h-6 bg-slate-700 mx-1 flex-shrink-0"></div>
-
-                <button 
-                  onClick={() => setView(view === 'list' ? 'create' : 'list')} 
-                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium shadow-lg flex-shrink-0"
-                >
-                  {view === 'list' ? <><Plus size={18} /><span>Новый</span></> : <><FolderOpen size={18} /><span>Просмотр</span></>}
-                </button>
+                <button onClick={() => setView('create')} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium shadow-lg flex-shrink-0"><Plus size={18} /><span>Новый</span></button>
             </div>
           </div>
           
-          {view === 'list' && (
-             <div className="flex flex-col sm:flex-row gap-2">
-               <div className="relative flex-grow">
-                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                 <input type="text" placeholder="Поиск..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-10 pr-3 py-2 text-sm focus:border-indigo-500" />
-                 {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"><XCircle size={16} /></button>}
-               </div>
-               
-               <div className="flex gap-2">
-                 <select value={selectedCategoryFilter} onChange={(e) => setSelectedCategoryFilter(e.target.value)} className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-300 flex-grow sm:flex-grow-0 min-w-[120px]">
-                   <option value="all">Все категории</option>
-                   {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
-                 </select>
-
-                 <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as any)} className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-300 flex-grow sm:flex-grow-0 min-w-[140px]">
-                    <option value="newest">Сначала новые</option>
-                    <option value="oldest">Сначала старые</option>
-                    <option value="with_photo">Сначала с фото</option>
-                    <option value="without_photo">Сначала без фото</option>
-                    <option value="with_notes">Сначала с прим.</option>
-                 </select>
-               </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+             <div className="relative flex-grow">
+               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+               <input type="text" placeholder="Поиск..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-10 pr-3 py-2 text-sm focus:border-indigo-500" />
+               {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500"><XCircle size={16} /></button>}
              </div>
-          )}
+             <div className="flex gap-2">
+               <select value={selectedCategoryFilter} onChange={(e) => setSelectedCategoryFilter(e.target.value)} className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-300 flex-grow sm:flex-grow-0 min-w-[120px]">
+                 <option value="all">Все категории</option>
+                 {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
+               </select>
+               <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as any)} className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-300 flex-grow sm:flex-grow-0 min-w-[140px]">
+                  <option value="newest">Сначала новые</option>
+                  <option value="oldest">Сначала старые</option>
+                  <option value="with_photo">Сначала с фото</option>
+                  <option value="without_photo">Сначала без фото</option>
+                  <option value="with_notes">Сначала с прим.</option>
+               </select>
+             </div>
+          </div>
         </div>
       </header>
 
+      {/* --- СПИСОК ПРОМПТОВ --- */}
       <main className="max-w-5xl mx-auto px-4 py-8">
-        
-        {view === 'create' && (
-          <div className="max-w-2xl mx-auto bg-slate-900 border border-slate-800 rounded-2xl p-6 md:p-8 shadow-xl">
-            <h2 className="text-2xl font-bold text-white mb-6">Добавить новый промпт</h2>
+        <div className="space-y-8">
+          {sortedCategories.map(cat => (
+            <div key={cat}>
+              <h2 className="text-xl font-bold text-white mb-4 border-l-4 border-indigo-500 pl-2">{cat}</h2>
+              <div className="grid gap-6">
+                {groupedPrompts[cat].map((p: any) => (
+                  <PromptCard 
+                    key={p.id} data={p} index={allFilteredPrompts.indexOf(p)} 
+                    onDelete={handleDelete} onEdit={setEditingPrompt} 
+                    onCategoryUpdate={handleCategoryUpdate} onUsageUpdate={handleUsageUpdate} 
+                    onAddHistory={handleAddHistory}
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+          {allFilteredPrompts.length === 0 && <div className="text-center text-slate-500 py-10">Ничего не найдено</div>}
+        </div>
+      </main>
+
+      {/* --- ЭКРАН СОЗДАНИЯ (ФИКСИРОВАННЫЙ ОВЕРЛЕЙ) --- */}
+      {view === 'create' && (
+        <div className="fixed inset-0 z-[100] bg-slate-950 overflow-y-auto animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <div className="max-w-2xl mx-auto p-6 min-h-screen">
+            <div className="flex items-center justify-between mb-6">
+               <button onClick={() => setView('list')} className="p-2 -ml-2 text-slate-400 hover:text-white"><ArrowLeft size={24} /></button>
+               <h2 className="text-2xl font-bold text-white">Новый промпт</h2>
+               <div className="w-8"></div>
+            </div>
             
-            <div className="space-y-6">
+            <div className="space-y-6 pb-20">
+              {/* Модель */}
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">Модель нейросети</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -567,6 +505,7 @@ function App() {
                 </div>
               </div>
 
+              {/* Название и Категория */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-400 mb-2">Название</label>
@@ -579,6 +518,7 @@ function App() {
                 </div>
               </div>
 
+              {/* Фото */}
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">Референс (Опционально)</label>
                 <div className={`border-2 border-dashed rounded-xl p-4 transition-colors ${uploadedImage ? 'border-indigo-500/50 bg-indigo-500/5' : 'border-slate-700 hover:border-slate-600 bg-slate-800'}`}>
@@ -597,16 +537,19 @@ function App() {
                 </div>
               </div>
 
+              {/* Промпт */}
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">Промпт</label>
                 <textarea value={inputPrompt} onChange={(e) => setInputPrompt(e.target.value)} placeholder="Ваш запрос..." className="w-full h-40 bg-slate-950 border border-slate-700 rounded-xl p-4 text-slate-200 focus:border-indigo-500 resize-none" />
               </div>
 
+              {/* Заметка */}
               <div>
                  <label className="block text-sm font-medium text-slate-400 mb-2">Заметка</label>
                  <textarea value={inputNote} onChange={(e) => setInputNote(e.target.value)} placeholder="Доп. инфо..." className="w-full h-20 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 focus:border-indigo-500 resize-none" />
               </div>
 
+              {/* Кнопки */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
                 <button onClick={handleManualSave} disabled={loading || !inputPrompt.trim()} className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white font-bold rounded-xl transition-all">
                   {loading ? <Loader2 className="animate-spin inline mr-2" /> : <Save className="inline mr-2" />} Сохранить
@@ -618,31 +561,10 @@ function App() {
               </div>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {view === 'list' && (
-          <div className="space-y-8">
-            {sortedCategories.map(cat => (
-              <div key={cat}>
-                <h2 className="text-xl font-bold text-white mb-4 border-l-4 border-indigo-500 pl-2">{cat}</h2>
-                <div className="grid gap-6">
-                  {groupedPrompts[cat].map((p: any) => (
-                    <PromptCard 
-                      key={p.id} data={p} index={allFilteredPrompts.indexOf(p)} 
-                      onDelete={handleDelete} onEdit={setEditingPrompt} 
-                      onCategoryUpdate={handleCategoryUpdate} onUsageUpdate={handleUsageUpdate} 
-                      onAddHistory={handleAddHistory}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))}
-            {allFilteredPrompts.length === 0 && <div className="text-center text-slate-500 py-10">Ничего не найдено</div>}
-          </div>
-        )}
-      </main>
-
-      {showScrollTopButton && (
+      {showScrollTopButton && view === 'list' && (
         <button onClick={scrollToTop} className="fixed bottom-6 right-6 z-50 w-12 h-12 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-lg hover:scale-110 active:scale-100"><ChevronUp size={24} /></button>
       )}
     </div>
