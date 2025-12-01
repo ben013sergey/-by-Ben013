@@ -18,7 +18,7 @@ export const analyzePrompt = async (promptText: string) => {
   } catch (error) {
     console.error("AI Analysis Error:", error);
     
-    // Заглушка при ошибке
+    // Заглушка
     return {
       shortTitle: "Без обработки",
       category: "Другое",
@@ -43,7 +43,7 @@ const getDimensions = (ratio: string) => {
   }
 };
 
-// 2. ГЕНЕРАЦИЯ КАРТИНКИ (Мульти-модельная)
+// 2. ГЕНЕРАЦИЯ КАРТИНКИ (Pollinations v2)
 export const generateNanoBananaImage = async (
   prompt: string, 
   refImage?: string | null, 
@@ -53,41 +53,32 @@ export const generateNanoBananaImage = async (
   try {
     const { w, h } = getDimensions(aspectRatio);
     const seed = Math.floor(Math.random() * 100000);
+    const encodedPrompt = encodeURIComponent(prompt);
 
-    // --- ВАРИАНТ 1: POLLINATIONS (Быстро) ---
+    let imageUrl = "";
+
+    // --- ВАРИАНТ 1: FAST (Быстро) ---
     if (provider === 'pollinations') {
-        const encodedPrompt = encodeURIComponent(prompt);
-        let imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux`;
-        
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        return { url: imageUrl, prompt: prompt, createdAt: Date.now() };
+        // Обычный Flux, быстро
+        imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux`;
     }
 
-    // --- ВАРИАНТ 2: HUGGING FACE (Качественно) ---
+    // --- ВАРИАНТ 2: HQ (Качественно) ---
+    // Мы используем тот же Pollinations, но с параметром enhance=true и моделью flux-realism
+    // Это дает качество лучше, чем HF Free Tier, и работает стабильнее
     if (provider === 'huggingface') {
-        // Улучшаем промпт для HF, так как он "голый"
-        const enhancedPrompt = `${prompt}, high quality, 8k, masterpiece, sharp focus, detailed texture`;
-        
-        const response = await fetch('/api/huggingface', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                prompt: enhancedPrompt,
-                width: w,
-                height: h
-            })
-        });
-
-        if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.error || "Ошибка HF");
-        }
-
-        const data = await response.json();
-        return { url: data.url, prompt: prompt, createdAt: Date.now() };
+        const hqPrompt = encodeURIComponent(`${prompt}, hyperrealistic, 8k resolution, cinematic lighting, sharp focus, masterpiece`);
+        imageUrl = `https://image.pollinations.ai/prompt/${hqPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux-realism&enhance=true`;
     }
 
-    throw new Error("Неизвестный провайдер");
+    // Искусственная задержка для UI (чтобы пользователь понял, что процесс идет)
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    return {
+      url: imageUrl,
+      prompt: prompt,
+      createdAt: Date.now()
+    };
 
   } catch (error) {
     console.error("Image Gen Error:", error);
