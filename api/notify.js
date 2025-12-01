@@ -7,18 +7,20 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const BOT_TOKEN = process.env.TG_BOT_TOKEN;
-  const ADMIN_ID = process.env.TG_ADMIN_ID;
+  const ADMIN_ID = process.env.TG_ADMIN_ID; // Убедитесь, что эта переменная есть в Vercel
 
   if (!BOT_TOKEN || !ADMIN_ID) {
+    console.error("TG config missing");
     return res.status(500).json({ error: "Нет настроек Telegram" });
   }
 
-  const { username, filename, count } = req.body;
+  // ВАЖНО: yandexDiskService отправляет поле 'user', а не 'username'
+  const { user, filename, count } = req.body;
 
   const message = `
 🔔 <b>Новое сохранение от Гостя!</b>
 
-👤 <b>Пользователь:</b> ${username}
+👤 <b>Пользователь:</b> ${user || 'Аноним'}
 📂 <b>Файл:</b> ${filename}
 📝 <b>Новых промптов:</b> ${count} шт.
 
@@ -26,7 +28,7 @@ export default async function handler(req, res) {
   `;
 
   try {
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    const tgRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -35,8 +37,17 @@ export default async function handler(req, res) {
         parse_mode: 'HTML'
       })
     });
+
+    const tgData = await tgRes.json();
+    
+    if (!tgData.ok) {
+        console.error("Telegram Error:", tgData);
+        throw new Error(tgData.description);
+    }
+
     return res.status(200).json({ status: 'ok' });
   } catch (error) {
+    console.error("Notify handler error:", error);
     return res.status(500).json({ error: error.message });
   }
 }
