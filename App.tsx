@@ -114,6 +114,10 @@ function App() {
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
 
+  // Duplicate Check
+  const [foundDuplicate, setFoundDuplicate] = useState<PromptData | null>(null);
+  const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
+
   const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
   const userId = tgUser?.id;
   let username = tgUser?.username || tgUser?.first_name || "Guest";
@@ -138,9 +142,9 @@ function App() {
     }
   }, [view]);
 
-  // --- ЛОГИКА ПРОВЕРКИ ДУБЛИКАТОВ (СИСТЕМНАЯ) ---
+  // --- ЛОГИКА ПРОВЕРКИ ДУБЛИКАТОВ ---
   const checkAndConfirmDuplicate = (text: string): boolean => {
-    if (text.length < 10) return true; // Слишком коротко, пропускаем
+    if (text.length < 10) return true; 
 
     let maxSimilarity = 0;
     let match: PromptData | null = null;
@@ -157,9 +161,7 @@ function App() {
       if (maxSimilarity > 0.95) break; 
     }
 
-    // Если схожесть > 60%
     if (maxSimilarity > 0.60 && match) {
-        // Вызываем СИСТЕМНОЕ окно (не тормозит телефон)
         const userChoice = window.confirm(
             `⚠️ НАЙДЕН ПОХОЖИЙ ПРОМПТ!\n\n` +
             `Название: "${match.shortTitle}"\n` +
@@ -169,19 +171,16 @@ function App() {
         );
 
         if (userChoice) {
-            return true; // Пользователь нажал ОК -> Сохраняем
+            return true;
         } else {
-            // Пользователь нажал Отмена -> Переходим к существующему
             setView('list');
-            setSearchQuery(match.shortTitle); // Вбиваем в поиск
+            setSearchQuery(match.shortTitle);
             clearCreateForm();
-            return false; // Отменяем сохранение
+            return false;
         }
     }
-
-    return true; // Дубликатов нет
+    return true; 
   };
-
 
   // --- ЭФФЕКТЫ ---
   useEffect(() => {
@@ -327,6 +326,8 @@ function App() {
     setInputNote(''); 
     setUploadedImage(null);
     localStorage.removeItem(DRAFT_KEY); 
+    setFoundDuplicate(null);
+    setShowDuplicateWarning(false);
   };
 
   const handleOpenCreate = () => {
@@ -336,8 +337,6 @@ function App() {
 
   const handleManualSave = async () => {
     if (!inputPrompt.trim()) return;
-    
-    // ПРОВЕРКА (СИСТЕМНАЯ)
     if (!checkAndConfirmDuplicate(inputPrompt)) return;
 
     setLoading(true);
@@ -357,8 +356,6 @@ function App() {
 
   const handleSave = async () => {
     if (!inputPrompt.trim()) return;
-
-    // ПРОВЕРКА (СИСТЕМНАЯ)
     if (!checkAndConfirmDuplicate(inputPrompt)) return;
 
     setLoading(true);
@@ -386,9 +383,7 @@ function App() {
   
   const resetFilters = () => { setSearchQuery(''); setSelectedCategoryFilter('all'); setSortOrder('newest'); };
 
-  // --- ФИЛЬТРАЦИЯ ---
   const allCategories = Array.from(new Set(prompts.map(p => p.category || 'Без категории')));
-  
   const allFilteredPrompts = prompts.filter(p => {
     const s = searchQuery.toLowerCase();
     const matches = p.shortTitle.toLowerCase().includes(s) || p.originalPrompt.toLowerCase().includes(s);
@@ -413,6 +408,7 @@ function App() {
   if (hasAccess === false) return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-center p-6"><div className="bg-red-500/10 p-6 rounded-2xl border border-red-500/20 max-w-sm"><Lock size={48} className="mx-auto text-red-500 mb-4" /><h2 className="text-2xl font-bold text-white mb-2">Доступ закрыт</h2><a href={CHANNEL_LINK} className="block w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold mt-4">Подписаться</a></div></div>;
   if (!isDataLoaded) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
 
+  // --- ЭКРАН СОЗДАНИЯ (ФИКСИРОВАННЫЙ ОВЕРЛЕЙ) ---
   if (view === 'create') {
     return (
       <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto w-full h-full">
@@ -511,14 +507,13 @@ function App() {
                 {isAdmin ? (
                   <button onClick={async () => { if(!confirm("Перезаписать?")) return; await saveToYandexDisk(prompts); showToast("Сохранено (Main)"); }} className="p-2 text-white bg-red-600 rounded-lg shadow-md"><Cloud size={18} /></button>
                 ) : (
-                  <button onClick={async () => { /* User logic */ }} className="p-2 text-slate-900 bg-yellow-400 rounded-lg shadow-md"><Cloud size={18} /></button>
+                  <button onClick={async () => { /* User copy logic */ }} className="p-2 text-slate-900 bg-yellow-400 rounded-lg shadow-md"><Cloud size={18} /></button>
                 )}
                 
                 {isAdmin && <label className="p-2 text-white bg-emerald-600 rounded-lg cursor-pointer"><HardDriveUpload size={18} /><input type="file" accept=".json" onChange={handleImport} className="hidden" /></label>}
             </div>
           </div>
           
-          {/* ФИЛЬТРЫ: ИСПРАВЛЕНА ВЕРСТКА ДЛЯ МОБИЛЬНЫХ */}
           <div className="flex flex-col gap-2">
              <div className="relative w-full">
                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
@@ -538,6 +533,17 @@ function App() {
                   <option value="without_photo">Без фото</option>
                   <option value="with_notes">С прим.</option>
                </select>
+               
+               {/* КНОПКА СБРОСА ФИЛЬТРОВ (ПОЯВЛЯЕТСЯ ЕСЛИ ЕСТЬ ФИЛЬТРЫ) */}
+               {(searchQuery || selectedCategoryFilter !== 'all' || sortOrder !== 'newest') && (
+                 <button
+                    onClick={resetFilters}
+                    className="p-2 bg-slate-950 border border-red-500/30 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors flex-shrink-0"
+                    title="Сбросить все фильтры"
+                 >
+                    <RefreshCw size={18} />
+                 </button>
+               )}
              </div>
           </div>
         </div>
@@ -564,7 +570,6 @@ function App() {
         </div>
       </main>
 
-      {/* FAB: КНОПКА СОЗДАНИЯ (ВСЕГДА ВИДНА ВНИЗУ) */}
       <button 
         onClick={handleOpenCreate} 
         className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-2xl shadow-indigo-900/50 hover:scale-110 active:scale-95 transition-all"
