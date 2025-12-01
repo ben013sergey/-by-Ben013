@@ -11,11 +11,19 @@ export default async function handler(req, res) {
   if (!TOKEN) return res.status(500).json({ error: "Нет токена" });
 
   try {
-    // --- 1. СОХРАНЕНИЕ (POST) ---
+    // --- 1. СОХРАНЕНИЕ / ПОЛУЧЕНИЕ ССЫЛКИ НА ЗАГРУЗКУ (POST) ---
     if (req.method === 'POST') {
-      // Получаем имя файла от сайта. Если не прислали - используем дефолтное (опасное)
-      const { filename } = req.body; 
-      const targetPath = filename ? `/${filename}` : "/database_prompts.json";
+      const { filename, type } = req.body; 
+      
+      let targetPath = "/database_prompts.json"; // По умолчанию база
+
+      // Если это картинка, кладем в папку images
+      if (type === 'image' && filename) {
+        targetPath = `/pv_images/${filename}`;
+      } else if (filename) {
+        // Кастомное имя для базы
+        targetPath = `/${filename}`;
+      }
 
       // Запрашиваем разрешение на загрузку
       const resp = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/upload?path=${targetPath}&overwrite=true`, {
@@ -25,9 +33,20 @@ export default async function handler(req, res) {
       return res.status(200).json(data);
     }
 
-    // --- 2. ЗАГРУЗКА (GET) ---
+    // --- 2. ПОЛУЧЕНИЕ ДАННЫХ (GET) ---
     if (req.method === 'GET') {
-      // Загружаем всегда ОСНОВНУЮ базу
+      const { action, path } = req.query;
+
+      // СЦЕНАРИЙ А: Получить прямую ссылку на картинку
+      if (action === 'get_file_link' && path) {
+         const linkRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/download?path=${encodeURIComponent(path)}`, {
+            headers: { 'Authorization': `OAuth ${TOKEN}` }
+         });
+         const linkData = await linkRes.json();
+         return res.status(200).json(linkData);
+      }
+
+      // СЦЕНАРИЙ Б: Скачать основную базу (как раньше)
       const FILE_PATH = "/database_prompts.json";
       
       const linkRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/download?path=${FILE_PATH}`, {
