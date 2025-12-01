@@ -4,7 +4,8 @@ import {
   ArrowDownUp, XCircle, MessageCircle, FileText, HardDriveDownload, 
   HardDriveUpload, CheckCircle2, AlertCircle, Save, ChevronDown, 
   Trash2, X, Download, RefreshCw, Wand2, Code, Database, ChevronUp, 
-  Send, Cloud, CloudDownload, Lock, Scaling, AlertTriangle, ArrowLeft 
+  Send, Cloud, CloudDownload, Lock, Scaling, AlertTriangle, ArrowLeft,
+  ExternalLink
 } from 'lucide-react';
 
 import { PromptData, VALID_CATEGORIES, GeneratedImage, AspectRatio } from './types';
@@ -13,8 +14,6 @@ import PromptCard from './components/PromptCard';
 import { EXAMPLE_PROMPTS } from './data/examplePrompts';
 import EditPromptModal from './components/EditPromptModal';
 import { saveToDB, loadFromDB } from './services/db';
-
-// ИМПОРТЫ ОБНОВЛЕНЫ: добавлено deleteImageFromYandex и notifyAdminNewPrompts
 import { 
     saveToYandexDisk, 
     loadFromYandexDisk, 
@@ -43,8 +42,7 @@ declare global {
 
 const STORAGE_KEY = 'promptvault_data_v1';
 const DRAFT_KEY = 'promptvault_create_draft';
-const ITEMS_PER_PAGE = 20;
-// ВАШ ID
+const ITEMS_PER_PAGE = 20; // Шаг подгрузки
 const ADMIN_ID = 439014866; 
 const CHANNEL_LINK = "https://t.me/ben013_promt_gallery"; 
 
@@ -96,7 +94,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
   const [editingPrompt, setEditingPrompt] = useState<PromptData | null>(null);
-  const [promptsRef, useRef] = useState<PromptData[]>([]); // (fix ref usage if needed, but here simple state is enough)
+  const [promptsRef, useRef] = useState<PromptData[]>([]); 
 
   const [inputPrompt, setInputPrompt] = useState('');
   const [inputTitle, setInputTitle] = useState('');
@@ -110,19 +108,19 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'with_photo' | 'without_photo' | 'with_notes'>('newest');
+  
+  // ПАГИНАЦИЯ
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
 
-  // --- ОПРЕДЕЛЕНИЕ ПРАВ ---
   const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
   const userId = tgUser?.id;
-  const username = tgUser?.username || tgUser?.first_name || "Guest"; // Имя для уведомлений
+  const username = tgUser?.username || tgUser?.first_name || "Guest";
   const urlParams = new URLSearchParams(window.location.search);
   const urlPass = urlParams.get('uid');
 
   const isAdmin = (userId === ADMIN_ID) || (urlPass === 'ben013');
 
-  // --- ЛОГИКА ДОСТУПА ---
   useEffect(() => {
     const checkSubscription = async () => {
       if (isAdmin) { setHasAccess(true); return; }
@@ -135,10 +133,7 @@ function App() {
            body: JSON.stringify({ userId: userId })
         });
         
-        if (!res.ok) {
-            setHasAccess(false); 
-            return;
-        }
+        if (!res.ok) { setHasAccess(false); return; }
 
         const data = await res.json();
         if (data.isSubscribed) setHasAccess(true);
@@ -150,7 +145,6 @@ function App() {
     checkSubscription();
   }, [userId, isAdmin]);
 
-  // --- НАСТРОЙКИ ТЕЛЕГРАМА ---
   useEffect(() => {
     if (window.Telegram?.WebApp) {
       window.Telegram.WebApp.expand();
@@ -191,10 +185,11 @@ function App() {
 
   const scrollToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
-  // Загрузка
+  // Сброс пагинации при смене фильтров
+  useEffect(() => { setVisibleCount(ITEMS_PER_PAGE); }, [searchQuery, selectedCategoryFilter, sortOrder]);
+
   useEffect(() => {
     if (hasAccess !== true) return;
-
     const loadData = async () => {
       setIsDataLoaded(false); 
       try {
@@ -230,10 +225,7 @@ function App() {
     }
   }, [toast]);
 
-  useEffect(() => { setVisibleCount(ITEMS_PER_PAGE); }, [searchQuery, selectedCategoryFilter, sortOrder]);
-
   const showToast = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
-
   const handleApplyInternalExamples = () => { showToast("Примеры отключены"); };
 
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -286,54 +278,38 @@ function App() {
 
   const handleOpenCreate = () => { clearCreateForm(); setView('create'); };
 
-  // --- ЛОГИКА СОХРАНЕНИЯ (ЖЕЛТАЯ/КРАСНАЯ КНОПКА) ---
   const handleUserSaveToCloud = async () => {
      if (isAdmin) {
-         // Админ: Перезаписывает основную базу
          if(!confirm("Перезаписать ОСНОВНУЮ базу?")) return;
          await saveToYandexDisk(prompts);
          showToast("Основная база обновлена!");
      } else {
-         // Пользователь: Сохраняет только свои новые промпты
          const userPrompts = prompts.filter(p => !p.isSystem);
          if (userPrompts.length === 0) {
              showToast("Нет новых промптов для сохранения", "error");
              return;
          }
-
          const dateStr = new Date().toISOString().slice(0, 10);
          const fileName = `suggestion_${username}_${dateStr}.json`;
-
          await saveToYandexDisk(userPrompts, fileName);
-         
-         // Отправляем уведомление админу
          await notifyAdminNewPrompts(username, fileName, userPrompts.length);
-
          showToast("Отправлено на проверку (Яндекс)", "success");
      }
   };
 
-
   const handleManualSave = async () => {
     if (!inputPrompt.trim()) return;
     if (!checkAndConfirmDuplicate(inputPrompt)) return;
-
     setLoading(true);
     try {
       let imagePath = null;
       let base64Preview = null;
-
       if (rawImageFile) {
          try {
              imagePath = await uploadImageToYandex(rawImageFile);
              base64Preview = null; 
-         } catch(e) {
-             console.error("Ошибка загрузки фото", e);
-             showToast("Фото не загрузилось", "error");
-         }
-      } else {
-         base64Preview = uploadedImage;
-      }
+         } catch(e) { console.error(e); showToast("Фото не загрузилось", "error"); }
+      } else { base64Preview = uploadedImage; }
 
       const newEntry: PromptData = {
         id: generateId(), 
@@ -348,7 +324,7 @@ function App() {
         usageCount: 0, 
         createdAt: Date.now(), 
         generationHistory: [], 
-        isSystem: false // Важно: это промпт пользователя
+        isSystem: false 
       };
       setPrompts(prev => [newEntry, ...prev]);
       showToast("Сохранено локально!"); 
@@ -360,21 +336,17 @@ function App() {
   const handleSave = async () => {
     if (!inputPrompt.trim()) return;
     if (!checkAndConfirmDuplicate(inputPrompt)) return;
-
     setLoading(true);
     try {
       const analysis = await analyzePrompt(inputPrompt);
       let imagePath = null;
       let base64Preview = null;
-
       if (rawImageFile) {
          try {
              imagePath = await uploadImageToYandex(rawImageFile);
              base64Preview = null;
          } catch(e) { showToast("Ошибка загрузки фото", "error"); }
-      } else {
-         base64Preview = uploadedImage;
-      }
+      } else { base64Preview = uploadedImage; }
 
       const newEntry: PromptData = {
         id: generateId(), 
@@ -398,77 +370,10 @@ function App() {
     } catch (error) { showToast("Ошибка AI", "error"); } finally { setLoading(false); }
   };
 
-  // --- ФУНКЦИЯ МИГРАЦИИ (ВРЕМЕННАЯ) ---
-  const handleMigrateDatabase = async () => {
-    if (!isAdmin) return;
-    const oldPrompts = prompts.filter(p => p.imageBase64 && !p.imagePath);
-    
-    if (oldPrompts.length === 0) {
-        showToast("База уже оптимизирована! Нет старых картинок.");
-        return;
-    }
-
-    if (!confirm(`Найдено ${oldPrompts.length} старых картинок. Превратить их в ссылки на Яндекс.Диске? Это займет время.`)) return;
-
-    setLoading(true);
-    let successCount = 0;
-    
-    // Создаем копию массива, чтобы менять её
-    const newPromptsList = [...prompts];
-
-    try {
-      for (const p of oldPrompts) {
-         if (!p.imageBase64) continue;
-
-         try {
-             // 1. Конвертируем Base64 обратно в Файл
-             const fetchRes = await fetch(p.imageBase64);
-             const blob = await fetchRes.blob();
-             const file = new File([blob], `migrated_${p.id}.jpg`, { type: "image/jpeg" });
-
-             // 2. Грузим на Яндекс
-             const newPath = await uploadImageToYandex(file);
-
-             // 3. Обновляем запись в нашем списке (удаляем base64, ставим путь)
-             const index = newPromptsList.findIndex(item => item.id === p.id);
-             if (index !== -1) {
-                 newPromptsList[index] = {
-                     ...newPromptsList[index],
-                     imageBase64: null, // Очищаем тяжелое поле
-                     imagePath: newPath // Записываем легкую ссылку
-                 };
-             }
-             successCount++;
-             console.log(`Мигрировано: ${p.shortTitle}`);
-         } catch (e) {
-             console.error(`Ошибка с промптом ${p.shortTitle}`, e);
-         }
-      }
-
-      // 4. Сохраняем обновленную легкую базу на диск и в приложение
-      setPrompts(newPromptsList);
-      await saveToYandexDisk(newPromptsList);
-      
-      showToast(`Успешно обновлено ${successCount} картинок! База легкая.`, "success");
-
-    } catch (e) {
-        console.error(e);
-        showToast("Ошибка миграции", "error");
-    } finally {
-        setLoading(false);
-    }
-  };
-
-    // --- УДАЛЕНИЕ (С УДАЛЕНИЕМ ФОТО С ДИСКА) ---
   const handleDelete = async (id: string) => {
     if(!confirm('Удалить этот промпт?')) return;
-    
     const promptToDelete = prompts.find(p => p.id === id);
-    if (promptToDelete?.imagePath) {
-        // Удаляем картинку с Яндекс.Диска
-        await deleteImageFromYandex(promptToDelete.imagePath);
-    }
-    
+    if (promptToDelete?.imagePath) await deleteImageFromYandex(promptToDelete.imagePath);
     setPrompts(prev => prev.filter(p => p.id !== id));
     showToast("Удалено");
   };
@@ -480,7 +385,7 @@ function App() {
   
   const resetFilters = () => { setSearchQuery(''); setSelectedCategoryFilter('all'); setSortOrder('newest'); };
 
-  const allCategories = Array.from(new Set(prompts.map(p => p.category || 'Без категории')));
+  // --- ФИЛЬТРАЦИЯ И СОРТИРОВКА ---
   const allFilteredPrompts = prompts.filter(p => {
     const s = searchQuery.toLowerCase();
     const matches = p.shortTitle.toLowerCase().includes(s) || p.originalPrompt.toLowerCase().includes(s);
@@ -494,10 +399,29 @@ function App() {
     return b.createdAt - a.createdAt; 
   });
 
-  const visiblePrompts = allFilteredPrompts.slice(0, visibleCount);
-  const groupedPrompts = visiblePrompts.reduce((acc, p) => { const c = p.category || 'Без категории'; if (!acc[c]) acc[c] = []; acc[c].push(p); return acc; }, {} as any);
-  const sortedCategories = Object.keys(groupedPrompts).sort();
+  // ПОДСЧЕТ КОЛИЧЕСТВА ПО КАТЕГОРИЯМ
+  const categoryCounts = prompts.reduce((acc, p) => {
+      const cat = p.category || 'Другое';
+      acc[cat] = (acc[cat] || 0) + 1;
+      return acc;
+  }, {} as Record<string, number>);
 
+  const allCategories = Array.from(new Set(prompts.map(p => p.category || 'Без категории'))).sort();
+
+  // ПАГИНАЦИЯ (Slicing)
+  const visiblePrompts = allFilteredPrompts.slice(0, visibleCount);
+  const groupedPrompts = visiblePrompts.reduce((acc, p) => { 
+      const c = p.category || 'Без категории'; 
+      if (!acc[c]) acc[c] = []; 
+      acc[c].push(p); 
+      return acc; 
+  }, {} as any);
+  const sortedGroupKeys = Object.keys(groupedPrompts).sort();
+
+  // Обработчик кнопки "Показать еще"
+  const handleShowMore = () => {
+      setVisibleCount(prev => prev + ITEMS_PER_PAGE);
+  };
 
   // --- РЕНДЕРИНГ ---
 
@@ -525,7 +449,6 @@ function App() {
              <div className="w-8"></div>
           </div>
           <div className="space-y-6 pb-20">
-            {/* ФОРМА СОЗДАНИЯ - ОСТАЛАСЬ ТАКОЙ ЖЕ */}
              <div>
               <label className="block text-sm font-medium text-slate-400 mb-2">Модель</label>
               <div className="grid grid-cols-3 gap-2">
@@ -592,38 +515,29 @@ function App() {
       <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 shadow-md">
         <div className="max-w-5xl mx-auto px-4 py-3 flex flex-col gap-3">
           
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-2 cursor-pointer" onClick={() => scrollToTop()}>
-                <div className="bg-indigo-600 p-1.5 rounded-lg"><Sparkles className="text-white w-4 h-4" /></div>
-                <h1 className="text-lg font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent hidden sm:block">Галерея</h1>
-                <h1 className="text-lg font-bold text-indigo-400 sm:hidden">PVault</h1>
+          {/* НОВАЯ ШАПКА ПО СКРИНШОТУ */}
+          <div className="flex justify-between items-start">
+            <div className="flex flex-col">
+                <div className="flex items-center gap-2 cursor-pointer" onClick={() => scrollToTop()}>
+                    <div className="bg-indigo-600 p-1.5 rounded-xl"><Sparkles className="text-white w-5 h-5" /></div>
+                    <div className="flex items-baseline gap-2">
+                        <h1 className="text-xl font-bold text-indigo-400">Галерея промптов</h1>
+                        <span className="text-sm text-slate-500 font-medium">({prompts.length})</span>
+                    </div>
+                </div>
+                <a href={CHANNEL_LINK} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-xs text-slate-500 hover:text-indigo-400 transition-colors mt-0.5 ml-10">
+                    <MessageCircle size={10} />
+                    <span>by Ben013</span>
+                </a>
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 mt-1">
                 <button onClick={handleApplyInternalExamples} className="p-2 text-slate-400 bg-slate-800 rounded-lg"><Database size={18} /></button>
                 <button onClick={async () => { if(!confirm("Загрузить базу?")) return; const data = await loadFromYandexDisk(); if(data) { const protectedData = data.map((p: any) => ({ ...p, isSystem: true })); setPrompts(protectedData); showToast("Обновлено!"); } }} className="p-2 text-white bg-blue-600 rounded-lg shadow-md"><CloudDownload size={18} /></button>
-
-              {/* ВРЕМЕННАЯ КНОПКА МИГРАЦИИ */}
-                {isAdmin && (
-                    <button 
-                        onClick={handleMigrateDatabase} 
-                        disabled={loading}
-                        className="p-2 text-white bg-orange-500 hover:bg-orange-600 rounded-lg shadow-md flex items-center gap-1"
-                        title="Оптимизировать старые картинки"
-                    >
-                        {loading ? <Loader2 size={18} className="animate-spin"/> : <Wand2 size={18} />}
-                    </button>
-                )}
-              
-                {/* КНОПКА СОХРАНЕНИЯ В ОБЛАКО */}
-                <button 
-                    onClick={handleUserSaveToCloud} 
-                    className={`p-2 text-white rounded-lg shadow-md flex items-center gap-1 ${isAdmin ? 'bg-red-600 hover:bg-red-500' : 'bg-yellow-500 hover:bg-yellow-400 text-slate-900'}`}
-                >
-                    <Cloud size={18} />
-                    {/* {!isAdmin && <span className="text-xs font-bold text-slate-900 px-1">Отправить</span>} */}
-                </button>
                 
+                <button onClick={handleUserSaveToCloud} className={`p-2 text-white rounded-lg shadow-md flex items-center gap-1 ${isAdmin ? 'bg-red-600 hover:bg-red-500' : 'bg-yellow-500 hover:bg-yellow-400 text-slate-900'}`}>
+                    <Cloud size={18} />
+                </button>
                 {isAdmin && <label className="p-2 text-white bg-emerald-600 rounded-lg cursor-pointer"><HardDriveUpload size={18} /><input type="file" accept=".json" onChange={handleImport} className="hidden" /></label>}
             </div>
           </div>
@@ -635,10 +549,13 @@ function App() {
                {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 p-1"><XCircle size={14} /></button>}
              </div>
              
+             {/* ФИЛЬТРЫ С КОЛИЧЕСТВОМ */}
              <div className="flex gap-2 w-full overflow-x-auto no-scrollbar">
                <select value={selectedCategoryFilter} onChange={(e) => setSelectedCategoryFilter(e.target.value)} className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-300 flex-grow min-w-[140px]">
-                 <option value="all">Все категории</option>
-                 {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                 <option value="all">Все категории ({prompts.length})</option>
+                 {allCategories.map(c => (
+                    <option key={c} value={c}>{c} ({categoryCounts[c] || 0})</option>
+                 ))}
                </select>
                <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as any)} className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-300 flex-grow min-w-[140px]">
                   <option value="newest">Сначала новые</option>
@@ -657,7 +574,7 @@ function App() {
 
       <main className="max-w-5xl mx-auto px-4 py-6">
         <div className="space-y-8">
-          {sortedCategories.map(cat => (
+          {sortedGroupKeys.map(cat => (
             <div key={cat}>
               <h2 className="text-lg font-bold text-white mb-3 border-l-4 border-indigo-500 pl-2">{cat}</h2>
               <div className="grid gap-4">
@@ -677,7 +594,24 @@ function App() {
               </div>
             </div>
           ))}
+          
           {allFilteredPrompts.length === 0 && <div className="text-center text-slate-500 py-10">Ничего не найдено</div>}
+
+          {/* КНОПКА "ПОКАЗАТЬ ЕЩЕ" */}
+          {visibleCount < allFilteredPrompts.length && (
+            <div className="flex flex-col items-center mt-8 mb-12 gap-2">
+                <button 
+                    onClick={handleShowMore}
+                    className="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-full font-medium transition-all shadow-lg border border-slate-700"
+                >
+                    <ChevronDown size={20} />
+                    Показать еще ({allFilteredPrompts.length - visibleCount})
+                </button>
+                <span className="text-xs text-slate-500">
+                    Показано {Math.min(visibleCount, allFilteredPrompts.length)} из {allFilteredPrompts.length} промптов
+                </span>
+            </div>
+          )}
         </div>
       </main>
 
