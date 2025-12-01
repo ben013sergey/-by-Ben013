@@ -36,14 +36,15 @@ declare global {
 const STORAGE_KEY = 'promptvault_data_v1';
 const DRAFT_KEY = 'promptvault_create_draft';
 const ITEMS_PER_PAGE = 20;
+// ВАШ ID
 const ADMIN_ID = 439014866; 
 const CHANNEL_LINK = "https://t.me/ben013_promt_gallery"; 
 
 // --- ФУНКЦИЯ СРАВНЕНИЯ ТЕКСТА ---
 function compareStrings(string1: string, string2: string): number {
   if (!string1 || !string2) return 0;
-  // Оптимизация: если длина отличается более чем на 40%, не сравниваем
-  if (Math.abs(string1.length - string2.length) > Math.max(string1.length, string2.length) * 0.4) {
+  // Оптимизация для мобильных: если длина сильно разная, не тратим ресурсы
+  if (Math.abs(string1.length - string2.length) > Math.max(string1.length, string2.length) * 0.5) {
     return 0;
   }
 
@@ -99,7 +100,6 @@ function App() {
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const promptsRef = useRef<PromptData[]>([]);
 
-  // Form states
   const [inputPrompt, setInputPrompt] = useState('');
   const [inputTitle, setInputTitle] = useState('');
   const [inputCategory, setInputCategory] = useState('');
@@ -107,30 +107,43 @@ function App() {
   const [selectedModel, setSelectedModel] = useState('Flux 2');
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
 
-  // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'with_photo' | 'without_photo' | 'with_notes'>('newest');
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
 
-  // Duplicate Check
-  const [foundDuplicate, setFoundDuplicate] = useState<PromptData | null>(null);
-  const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
-
+  // --- ОПРЕДЕЛЕНИЕ ПРАВ ---
   const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
-  alert("My ID: " + (tgUser?.id || "No ID"));
   const userId = tgUser?.id;
-  let username = tgUser?.username || tgUser?.first_name || "Guest";
-  
   const urlParams = new URLSearchParams(window.location.search);
   const urlPass = urlParams.get('uid');
 
-  let isAdmin = false;
-  if (userId === ADMIN_ID) isAdmin = true;
-  if (urlPass === 'ben013') { isAdmin = true; username = "Admin (Browser)"; }
+  // Админ если: ID совпадает ИЛИ введен пароль в URL
+  const isAdmin = (userId === ADMIN_ID) || (urlPass === 'ben013');
 
-  // --- ТЕЛЕГРАМ НАСТРОЙКИ ---
+  // --- ЛОГИКА ДОСТУПА ---
+  useEffect(() => {
+    const checkSubscription = async () => {
+      // 1. Если Админ - пускаем сразу (даже если нет ID, но есть пароль)
+      if (isAdmin) { 
+        setHasAccess(true); 
+        return; 
+      }
+
+      // 2. Если не Админ и нет ID (просто браузер) - блокируем
+      if (!userId) { 
+        setHasAccess(false); 
+        return; 
+      }
+
+      // 3. Обычный пользователь в Телеграме - пускаем
+      setHasAccess(true); 
+    };
+    checkSubscription();
+  }, [userId, isAdmin]);
+
+  // --- НАСТРОЙКИ ТЕЛЕГРАМА ---
   useEffect(() => {
     if (window.Telegram?.WebApp) {
       window.Telegram.WebApp.expand();
@@ -143,9 +156,9 @@ function App() {
     }
   }, [view]);
 
-  // --- ЛОГИКА ПРОВЕРКИ ДУБЛИКАТОВ ---
+  // --- ПРОВЕРКА ДУБЛИКАТОВ (Порог 60%) ---
   const checkAndConfirmDuplicate = (text: string): boolean => {
-    if (text.length < 10) return true; 
+    if (text.length < 10) return true;
 
     let maxSimilarity = 0;
     let match: PromptData | null = null;
@@ -164,11 +177,10 @@ function App() {
 
     if (maxSimilarity > 0.60 && match) {
         const userChoice = window.confirm(
-            `⚠️ НАЙДЕН ПОХОЖИЙ ПРОМПТ!\n\n` +
+            `⚠️ НАЙДЕН ДУБЛИКАТ (${Math.round(maxSimilarity * 100)}%)\n\n` +
             `Название: "${match.shortTitle}"\n` +
-            `Сходство: ${Math.round(maxSimilarity * 100)}%\n\n` +
-            `Нажмите "ОК", чтобы создать дубликат.\n` +
-            `Нажмите "Отмена", чтобы перейти к существующему.`
+            `Нажмите ОК, чтобы все равно сохранить.\n` +
+            `Нажмите Отмена, чтобы посмотреть существующий.`
         );
 
         if (userChoice) {
@@ -182,16 +194,6 @@ function App() {
     }
     return true; 
   };
-
-  // --- ЭФФЕКТЫ ---
-  useEffect(() => {
-    const checkSubscription = async () => {
-      if (isAdmin) { setHasAccess(true); return; }
-      if (!userId) { setHasAccess(false); return; } 
-      setHasAccess(true); 
-    };
-    checkSubscription();
-  }, [userId, isAdmin]);
 
   useEffect(() => { promptsRef.current = prompts; }, [prompts]);
 
@@ -230,7 +232,6 @@ function App() {
     loadData();
   }, [hasAccess]);
 
-  // Черновики
   useEffect(() => {
     const draft = localStorage.getItem(DRAFT_KEY);
     if (draft && view === 'create' && !inputPrompt) {
@@ -267,9 +268,7 @@ function App() {
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
 
-  // --- ФУНКЦИИ ---
-  
-  const handleApplyInternalExamples = () => { showToast("Примеры пока отключены"); };
+  const handleApplyInternalExamples = () => { showToast("Примеры отключены"); };
 
   const handleBackupDatabase = () => {
     try {
@@ -281,7 +280,7 @@ function App() {
       document.body.appendChild(downloadAnchorNode);
       downloadAnchorNode.click();
       downloadAnchorNode.remove();
-      showToast("Скачано на устройство", "success");
+      showToast("Скачано локально", "success");
     } catch (e) {
       showToast("Ошибка экспорта", "error");
     }
@@ -296,7 +295,7 @@ function App() {
         const json = event.target?.result as string;
         const importedData = JSON.parse(json);
         processImportedData(importedData);
-        showToast(`Импортировано ${importedData.length} промптов!`);
+        showToast(`Импортировано ${importedData.length}!`);
         e.target.value = '';
       } catch (err) { showToast("Ошибка файла", "error"); }
     };
@@ -327,8 +326,6 @@ function App() {
     setInputNote(''); 
     setUploadedImage(null);
     localStorage.removeItem(DRAFT_KEY); 
-    setFoundDuplicate(null);
-    setShowDuplicateWarning(false);
   };
 
   const handleOpenCreate = () => {
@@ -406,10 +403,12 @@ function App() {
   // --- РЕНДЕРИНГ ---
 
   if (hasAccess === null) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
+  
   if (hasAccess === false) return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-center p-6"><div className="bg-red-500/10 p-6 rounded-2xl border border-red-500/20 max-w-sm"><Lock size={48} className="mx-auto text-red-500 mb-4" /><h2 className="text-2xl font-bold text-white mb-2">Доступ закрыт</h2><a href={CHANNEL_LINK} className="block w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold mt-4">Подписаться</a></div></div>;
+
   if (!isDataLoaded) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
 
-  // --- ЭКРАН СОЗДАНИЯ (ФИКСИРОВАННЫЙ ОВЕРЛЕЙ) ---
+  // --- ЭКРАН СОЗДАНИЯ ---
   if (view === 'create') {
     return (
       <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto w-full h-full">
@@ -535,12 +534,11 @@ function App() {
                   <option value="with_notes">С прим.</option>
                </select>
                
-               {/* КНОПКА СБРОСА ФИЛЬТРОВ (ПОЯВЛЯЕТСЯ ЕСЛИ ЕСТЬ ФИЛЬТРЫ) */}
                {(searchQuery || selectedCategoryFilter !== 'all' || sortOrder !== 'newest') && (
                  <button
                     onClick={resetFilters}
                     className="p-2 bg-slate-950 border border-red-500/30 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors flex-shrink-0"
-                    title="Сбросить все фильтры"
+                    title="Сбросить фильтры"
                  >
                     <RefreshCw size={18} />
                  </button>
@@ -558,10 +556,15 @@ function App() {
               <div className="grid gap-4">
                 {groupedPrompts[cat].map((p: any) => (
                   <PromptCard 
-                    key={p.id} data={p} index={allFilteredPrompts.indexOf(p)} 
-                    onDelete={handleDelete} onEdit={setEditingPrompt} 
-                    onCategoryUpdate={handleCategoryUpdate} onUsageUpdate={handleUsageUpdate} 
+                    key={p.id} 
+                    data={p} 
+                    index={allFilteredPrompts.indexOf(p)} 
+                    onDelete={handleDelete} 
+                    onEdit={setEditingPrompt} 
+                    onCategoryUpdate={handleCategoryUpdate} 
+                    onUsageUpdate={handleUsageUpdate} 
                     onAddHistory={handleAddHistory}
+                    isAdmin={isAdmin}  // <--- ВОТ ТУТ МЫ ВЕРНУЛИ ВАЖНУЮ ДЕТАЛЬ
                   />
                 ))}
               </div>
@@ -586,4 +589,3 @@ function App() {
 }
 
 export default App;
-
