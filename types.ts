@@ -35,13 +35,15 @@ export interface PromptData {
   
   variants: PromptVariants;
   
+  // Для старых записей оставляем base64, для новых - imagePath
   imageBase64: string | null;
+  imagePath?: string | null;
+
   note?: string; 
   usageCount?: number; 
   generationHistory?: GeneratedImage[]; 
   createdAt: number;
   
-  // НОВОЕ ПОЛЕ: Защита от редактирования
   isSystem?: boolean; 
 }
 
