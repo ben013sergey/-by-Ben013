@@ -228,6 +228,23 @@ function App() {
   const showToast = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
   const handleApplyInternalExamples = () => { showToast("Примеры отключены"); };
 
+  // --- ФУНКЦИЯ СКАЧИВАНИЯ ЛОКАЛЬНОГО БЭКАПА (ВОССТАНОВЛЕНО) ---
+  const handleBackupDatabase = () => {
+    try {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(prompts, null, 2));
+      const downloadAnchorNode = document.createElement('a');
+      const date = new Date().toISOString().slice(0, 10);
+      downloadAnchorNode.setAttribute("href", dataStr);
+      downloadAnchorNode.setAttribute("download", `promptvault_backup_${date}.json`);
+      document.body.appendChild(downloadAnchorNode);
+      downloadAnchorNode.click();
+      downloadAnchorNode.remove();
+      showToast("База скачана локально!", "success");
+    } catch (e) {
+      showToast("Ошибка экспорта", "error");
+    }
+  };
+
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -515,7 +532,7 @@ function App() {
       <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 shadow-md">
         <div className="max-w-5xl mx-auto px-4 py-3 flex flex-col gap-3">
           
-          {/* НОВАЯ ШАПКА ПО СКРИНШОТУ */}
+          {/* ШАПКА */}
           <div className="flex justify-between items-start">
             <div className="flex flex-col">
                 <div className="flex items-center gap-2 cursor-pointer" onClick={() => scrollToTop()}>
@@ -531,14 +548,56 @@ function App() {
                 </a>
             </div>
             
+            {/* КНОПКИ В ШАПКЕ С ПОДСКАЗКАМИ */}
             <div className="flex items-center gap-2 mt-1">
-                <button onClick={handleApplyInternalExamples} className="p-2 text-slate-400 bg-slate-800 rounded-lg"><Database size={18} /></button>
-                <button onClick={async () => { if(!confirm("Загрузить базу?")) return; const data = await loadFromYandexDisk(); if(data) { const protectedData = data.map((p: any) => ({ ...p, isSystem: true })); setPrompts(protectedData); showToast("Обновлено!"); } }} className="p-2 text-white bg-blue-600 rounded-lg shadow-md"><CloudDownload size={18} /></button>
+                {/* 1. Сброс к примерам */}
+                <button 
+                    onClick={handleApplyInternalExamples} 
+                    className="p-2 text-slate-400 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors"
+                    title="Сбросить к стандартным примерам"
+                >
+                    <Database size={18} />
+                </button>
+
+                {/* 2. Загрузить из Облака (Яндекс) */}
+                <button 
+                    onClick={async () => { if(!confirm("Загрузить базу?")) return; const data = await loadFromYandexDisk(); if(data) { const protectedData = data.map((p: any) => ({ ...p, isSystem: true })); setPrompts(protectedData); showToast("Обновлено!"); } }} 
+                    className="p-2 text-white bg-blue-500 hover:bg-blue-400 rounded-lg shadow-md transition-colors"
+                    title="Загрузить базу из Яндекс.Диска"
+                >
+                    <CloudDownload size={18} />
+                </button>
                 
-                <button onClick={handleUserSaveToCloud} className={`p-2 text-white rounded-lg shadow-md flex items-center gap-1 ${isAdmin ? 'bg-red-600 hover:bg-red-500' : 'bg-yellow-500 hover:bg-yellow-400 text-slate-900'}`}>
+                {/* 3. Сохранить в Облако (Желтая/Красная) */}
+                <button 
+                    onClick={handleUserSaveToCloud} 
+                    className={`p-2 text-white rounded-lg shadow-md flex items-center gap-1 transition-colors ${isAdmin ? 'bg-red-600 hover:bg-red-500' : 'bg-yellow-500 hover:bg-yellow-400 text-slate-900'}`}
+                    title={isAdmin ? "Перезаписать ОСНОВНУЮ базу в облаке" : "Отправить новые промпты админу"}
+                >
                     <Cloud size={18} />
                 </button>
-                {isAdmin && <label className="p-2 text-white bg-emerald-600 rounded-lg cursor-pointer"><HardDriveUpload size={18} /><input type="file" accept=".json" onChange={handleImport} className="hidden" /></label>}
+                
+                {/* 4. Импорт локального файла (Зеленая) */}
+                {isAdmin && (
+                    <label 
+                        className="p-2 text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg cursor-pointer shadow-md transition-colors"
+                        title="Импортировать базу из файла (.json)"
+                    >
+                        <HardDriveUpload size={18} />
+                        <input type="file" accept=".json" onChange={handleImport} className="hidden" />
+                    </label>
+                )}
+
+                {/* 5. Скачать базу локально (Синяя) - ВОССТАНОВЛЕННАЯ КНОПКА */}
+                {isAdmin && (
+                    <button 
+                        onClick={handleBackupDatabase}
+                        className="p-2 text-white bg-blue-700 hover:bg-blue-600 rounded-lg shadow-md transition-colors"
+                        title="Скачать базу данных (.json)"
+                    >
+                        <HardDriveDownload size={18} />
+                    </button>
+                )}
             </div>
           </div>
           
