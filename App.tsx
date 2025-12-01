@@ -39,15 +39,17 @@ const ITEMS_PER_PAGE = 20;
 const ADMIN_ID = 439014866; 
 const CHANNEL_LINK = "https://t.me/ben013_promt_gallery"; 
 
-// --- ФУНКЦИЯ СРАВНЕНИЯ (Оставляем только для финальной проверки) ---
+// --- ФУНКЦИЯ СРАВНЕНИЯ ТЕКСТА ---
 function compareStrings(string1: string, string2: string): number {
   if (!string1 || !string2) return 0;
-  // Быстрая проверка длины
-  if (Math.abs(string1.length - string2.length) > Math.max(string1.length, string2.length) * 0.3) {
+  // Оптимизация: если длина отличается более чем на 40%, не сравниваем
+  if (Math.abs(string1.length - string2.length) > Math.max(string1.length, string2.length) * 0.4) {
     return 0;
   }
+
   const s1 = string1.toLowerCase().replace(/[^a-zа-яё0-9]/g, '');
   const s2 = string2.toLowerCase().replace(/[^a-zа-яё0-9]/g, '');
+  
   if (s1 === s2) return 1;
   if (s1.length < 3 || s2.length < 3) return 0;
 
@@ -57,6 +59,7 @@ function compareStrings(string1: string, string2: string): number {
     const count = bigrams.has(bigram) ? bigrams.get(bigram) + 1 : 1;
     bigrams.set(bigram, count);
   }
+
   let intersection = 0;
   for (let i = 0; i < s2.length - 1; i++) {
     const bigram = s2.substring(i, i + 2);
@@ -66,6 +69,7 @@ function compareStrings(string1: string, string2: string): number {
       intersection++;
     }
   }
+
   return (2.0 * intersection) / (s1.length + s2.length - 2);
 }
 
@@ -134,6 +138,51 @@ function App() {
     }
   }, [view]);
 
+  // --- ЛОГИКА ПРОВЕРКИ ДУБЛИКАТОВ (СИСТЕМНАЯ) ---
+  const checkAndConfirmDuplicate = (text: string): boolean => {
+    if (text.length < 10) return true; // Слишком коротко, пропускаем
+
+    let maxSimilarity = 0;
+    let match: PromptData | null = null;
+
+    for (const p of prompts) {
+      const sim1 = compareStrings(text, p.originalPrompt);
+      const sim2 = compareStrings(text, p.variants.maleEn || '');
+      const currentMax = Math.max(sim1, sim2);
+
+      if (currentMax > maxSimilarity) {
+        maxSimilarity = currentMax;
+        match = p;
+      }
+      if (maxSimilarity > 0.95) break; 
+    }
+
+    // Если схожесть > 60%
+    if (maxSimilarity > 0.60 && match) {
+        // Вызываем СИСТЕМНОЕ окно (не тормозит телефон)
+        const userChoice = window.confirm(
+            `⚠️ НАЙДЕН ПОХОЖИЙ ПРОМПТ!\n\n` +
+            `Название: "${match.shortTitle}"\n` +
+            `Сходство: ${Math.round(maxSimilarity * 100)}%\n\n` +
+            `Нажмите "ОК", чтобы создать дубликат.\n` +
+            `Нажмите "Отмена", чтобы перейти к существующему.`
+        );
+
+        if (userChoice) {
+            return true; // Пользователь нажал ОК -> Сохраняем
+        } else {
+            // Пользователь нажал Отмена -> Переходим к существующему
+            setView('list');
+            setSearchQuery(match.shortTitle); // Вбиваем в поиск
+            clearCreateForm();
+            return false; // Отменяем сохранение
+        }
+    }
+
+    return true; // Дубликатов нет
+  };
+
+
   // --- ЭФФЕКТЫ ---
   useEffect(() => {
     const checkSubscription = async () => {
@@ -157,6 +206,7 @@ function App() {
   // Загрузка
   useEffect(() => {
     if (hasAccess !== true) return;
+
     const loadData = async () => {
       setIsDataLoaded(false); 
       try {
@@ -180,6 +230,7 @@ function App() {
     loadData();
   }, [hasAccess]);
 
+  // Черновики
   useEffect(() => {
     const draft = localStorage.getItem(DRAFT_KEY);
     if (draft && view === 'create' && !inputPrompt) {
@@ -192,7 +243,7 @@ function App() {
         if (parsed.selectedModel) setSelectedModel(parsed.selectedModel);
       } catch (e) {}
     }
-  }, [view]);
+  }, [view]); 
 
   useEffect(() => {
     if (view === 'create') {
@@ -270,7 +321,11 @@ function App() {
   };
 
   const clearCreateForm = () => {
-    setInputPrompt(''); setInputTitle(''); setInputCategory(''); setInputNote(''); setUploadedImage(null);
+    setInputPrompt(''); 
+    setInputTitle(''); 
+    setInputCategory(''); 
+    setInputNote(''); 
+    setUploadedImage(null);
     localStorage.removeItem(DRAFT_KEY); 
   };
 
@@ -279,35 +334,11 @@ function App() {
       setView('create'); 
   };
 
-  // ФУНКЦИЯ ПРОВЕРКИ (Вызывается ТОЛЬКО при сохранении)
-  const checkForDuplicates = (): boolean => {
-    if (inputPrompt.length < 15) return false;
-    let maxSimilarity = 0;
-    let match: PromptData | null = null;
-
-    for (const p of prompts) {
-      const sim1 = compareStrings(inputPrompt, p.originalPrompt);
-      const sim2 = compareStrings(inputPrompt, p.variants.maleEn || '');
-      const currentMax = Math.max(sim1, sim2);
-      if (currentMax > maxSimilarity) {
-        maxSimilarity = currentMax;
-        match = p;
-      }
-      if (maxSimilarity > 0.95) break; 
-    }
-
-    if (maxSimilarity > 0.70 && match) {
-       return confirm(`⚠️ ВНИМАНИЕ! \nНайден похожий промпт (${Math.round(maxSimilarity*100)}% совпадения):\n"${match.shortTitle}"\n\nВы уверены, что хотите создать дубликат?`);
-    }
-    return true; // Нет дубликатов или пользователь согласился
-  };
-
   const handleManualSave = async () => {
     if (!inputPrompt.trim()) return;
     
-    // ПРОВЕРКА ПЕРЕД СОХРАНЕНИЕМ (Один раз, быстро)
-    const canProceed = checkForDuplicates();
-    if (!canProceed) return;
+    // ПРОВЕРКА (СИСТЕМНАЯ)
+    if (!checkAndConfirmDuplicate(inputPrompt)) return;
 
     setLoading(true);
     try {
@@ -327,9 +358,8 @@ function App() {
   const handleSave = async () => {
     if (!inputPrompt.trim()) return;
 
-    // ПРОВЕРКА ПЕРЕД СОХРАНЕНИЕМ
-    const canProceed = checkForDuplicates();
-    if (!canProceed) return;
+    // ПРОВЕРКА (СИСТЕМНАЯ)
+    if (!checkAndConfirmDuplicate(inputPrompt)) return;
 
     setLoading(true);
     try {
@@ -383,19 +413,17 @@ function App() {
   if (hasAccess === false) return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-center p-6"><div className="bg-red-500/10 p-6 rounded-2xl border border-red-500/20 max-w-sm"><Lock size={48} className="mx-auto text-red-500 mb-4" /><h2 className="text-2xl font-bold text-white mb-2">Доступ закрыт</h2><a href={CHANNEL_LINK} className="block w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold mt-4">Подписаться</a></div></div>;
   if (!isDataLoaded) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
 
-  // --- ЭКРАН СОЗДАНИЯ (ФИКСИРОВАННЫЙ ОВЕРЛЕЙ) ---
   if (view === 'create') {
     return (
       <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto w-full h-full">
         <div className="max-w-2xl mx-auto p-4 min-h-screen">
           <div className="flex items-center justify-between mb-6 sticky top-0 bg-slate-950/95 backdrop-blur py-2 z-10">
-             <button onClick={() => setView('list')} className="p-2 -ml-2 text-slate-400 hover:text-white"><ArrowLeft size={24} /></button>
+             <button onClick={() => { setView('list'); clearCreateForm(); }} className="p-2 -ml-2 text-slate-400 hover:text-white"><ArrowLeft size={24} /></button>
              <h2 className="text-xl font-bold text-white">Новый промпт</h2>
              <div className="w-8"></div>
           </div>
           
           <div className="space-y-6 pb-20">
-            {/* Модель */}
             <div>
               <label className="block text-sm font-medium text-slate-400 mb-2">Модель</label>
               <div className="grid grid-cols-3 gap-2">
@@ -405,7 +433,6 @@ function App() {
               </div>
             </div>
 
-            {/* Название и Категория */}
             <div className="grid grid-cols-1 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">Название</label>
@@ -418,7 +445,6 @@ function App() {
               </div>
             </div>
 
-            {/* Фото */}
             <div>
               <label className="block text-sm font-medium text-slate-400 mb-2">Референс</label>
               <div className={`border-2 border-dashed rounded-xl p-4 transition-colors ${uploadedImage ? 'border-indigo-500/50 bg-indigo-500/5' : 'border-slate-700 hover:border-slate-600 bg-slate-800'}`}>
@@ -437,19 +463,16 @@ function App() {
               </div>
             </div>
 
-            {/* Промпт */}
             <div>
               <label className="block text-sm font-medium text-slate-400 mb-2">Промпт</label>
               <textarea value={inputPrompt} onChange={(e) => setInputPrompt(e.target.value)} placeholder="Ваш запрос..." className="w-full h-40 bg-slate-900 border border-slate-700 rounded-xl p-4 text-slate-200 focus:border-indigo-500 resize-none" />
             </div>
 
-            {/* Заметка */}
             <div>
                <label className="block text-sm font-medium text-slate-400 mb-2">Заметка</label>
                <textarea value={inputNote} onChange={(e) => setInputNote(e.target.value)} placeholder="Доп. инфо..." className="w-full h-20 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 focus:border-indigo-500 resize-none" />
             </div>
 
-            {/* Кнопки */}
             <div className="grid grid-cols-1 gap-3 pt-2 pb-10">
               <button onClick={handleSave} disabled={loading || !inputPrompt.trim()} className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-bold rounded-xl transition-all shadow-lg shadow-indigo-900/30">
                 {loading ? <Loader2 className="animate-spin inline mr-2" /> : <Sparkles className="inline mr-2" />} Сохранить и обработать
@@ -474,7 +497,6 @@ function App() {
       <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 shadow-md">
         <div className="max-w-5xl mx-auto px-4 py-3 flex flex-col gap-3">
           
-          {/* Верхняя строка: Лого + Кнопки */}
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-2 cursor-pointer" onClick={() => scrollToTop()}>
                 <div className="bg-indigo-600 p-1.5 rounded-lg"><Sparkles className="text-white w-4 h-4" /></div>
@@ -489,25 +511,34 @@ function App() {
                 {isAdmin ? (
                   <button onClick={async () => { if(!confirm("Перезаписать?")) return; await saveToYandexDisk(prompts); showToast("Сохранено (Main)"); }} className="p-2 text-white bg-red-600 rounded-lg shadow-md"><Cloud size={18} /></button>
                 ) : (
-                  <button onClick={async () => { /* User copy logic */ }} className="p-2 text-slate-900 bg-yellow-400 rounded-lg shadow-md"><Cloud size={18} /></button>
+                  <button onClick={async () => { /* User logic */ }} className="p-2 text-slate-900 bg-yellow-400 rounded-lg shadow-md"><Cloud size={18} /></button>
                 )}
                 
                 {isAdmin && <label className="p-2 text-white bg-emerald-600 rounded-lg cursor-pointer"><HardDriveUpload size={18} /><input type="file" accept=".json" onChange={handleImport} className="hidden" /></label>}
             </div>
           </div>
           
-          {/* Нижняя строка: Поиск и Фильтры */}
-          <div className="flex gap-2">
-             <div className="relative flex-grow">
+          {/* ФИЛЬТРЫ: ИСПРАВЛЕНА ВЕРСТКА ДЛЯ МОБИЛЬНЫХ */}
+          <div className="flex flex-col gap-2">
+             <div className="relative w-full">
                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
                <input type="text" placeholder="Поиск..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-8 py-2 text-sm focus:border-indigo-500" />
                {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 p-1"><XCircle size={14} /></button>}
              </div>
              
-             <select value={selectedCategoryFilter} onChange={(e) => setSelectedCategoryFilter(e.target.value)} className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-300 max-w-[100px] truncate">
-               <option value="all">Все</option>
-               {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
-             </select>
+             <div className="flex gap-2 w-full overflow-x-auto no-scrollbar">
+               <select value={selectedCategoryFilter} onChange={(e) => setSelectedCategoryFilter(e.target.value)} className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-300 flex-grow min-w-[140px]">
+                 <option value="all">Все категории</option>
+                 {allCategories.map(c => <option key={c} value={c}>{c}</option>)}
+               </select>
+               <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as any)} className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-300 flex-grow min-w-[140px]">
+                  <option value="newest">Сначала новые</option>
+                  <option value="oldest">Сначала старые</option>
+                  <option value="with_photo">С фото</option>
+                  <option value="without_photo">Без фото</option>
+                  <option value="with_notes">С прим.</option>
+               </select>
+             </div>
           </div>
         </div>
       </header>
