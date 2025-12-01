@@ -39,22 +39,13 @@ const ITEMS_PER_PAGE = 20;
 const ADMIN_ID = 439014866; 
 const CHANNEL_LINK = "https://t.me/ben013_promt_gallery"; 
 
-// --- ФУНКЦИЯ СРАВНЕНИЯ ТЕКСТА (ОПТИМИЗИРОВАННАЯ) ---
-function compareStrings(string1: string, string2: string): number {
-  if (!string1 || !string2) return 0;
-  
-  // 1. Оптимизация: Если длина отличается более чем на 30%, это точно не дубликат
-  if (Math.abs(string1.length - string2.length) > Math.max(string1.length, string2.length) * 0.3) {
-    return 0;
-  }
+// --- ФУНКЦИЯ ОЧИСТКИ СТРОКИ ---
+const cleanString = (str: string) => str.toLowerCase().replace(/[^a-zа-яё0-9]/g, '');
 
-  // 2. Жесткая чистка: оставляем только буквы и цифры (убираем пробелы, знаки)
-  const s1 = string1.toLowerCase().replace(/[^a-zа-яё0-9]/g, '');
-  const s2 = string2.toLowerCase().replace(/[^a-zа-яё0-9]/g, '');
-  
+// --- ФУНКЦИЯ СРАВНЕНИЯ (Дайса) ---
+function compareStrings(s1: string, s2: string): number {
   if (s1 === s2) return 1;
-  // Если после чистки строки слишком короткие, не сравниваем
-  if (s1.length < 5 || s2.length < 5) return 0;
+  if (s1.length < 3 || s2.length < 3) return 0;
 
   const bigrams = new Map();
   for (let i = 0; i < s1.length - 1; i++) {
@@ -77,7 +68,7 @@ function compareStrings(string1: string, string2: string): number {
 }
 
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => (
-  <div className={`fixed bottom-6 right-6 z-[200] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border animate-in slide-in-from-bottom-5 fade-in duration-300 ${
+  <div className={`fixed bottom-6 right-6 z-[9999] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl border animate-in slide-in-from-bottom-5 fade-in duration-300 ${
     type === 'success' ? 'bg-slate-800 border-green-500/30 text-green-400' : 'bg-slate-800 border-red-500/30 text-red-400'
   }`}>
     {type === 'success' ? <CheckCircle2 size={20} /> : <AlertCircle size={20} />}
@@ -113,7 +104,8 @@ function App() {
   // Duplicate Check
   const [foundDuplicate, setFoundDuplicate] = useState<PromptData | null>(null);
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
-  const [forceSave, setForceSave] = useState(false); 
+  const [forceSave, setForceSave] = useState(false);
+  const [isChecking, setIsChecking] = useState(false); // Индикатор проверки
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -137,7 +129,6 @@ function App() {
   useEffect(() => {
     if (window.Telegram?.WebApp) {
       window.Telegram.WebApp.expand();
-      
       if (view === 'create') {
         window.Telegram.WebApp.BackButton.show();
         window.Telegram.WebApp.BackButton.onClick(() => {
@@ -150,23 +141,48 @@ function App() {
     }
   }, [view]);
 
-  // --- ЛОГИКА ПОИСКА ДУБЛИКАТА ---
-  const checkDuplicateInternal = (text: string): { duplicate: PromptData | null, score: number } => {
-    if (text.length < 15) return { duplicate: null, score: 0 };
+  // --- АСИНХРОННАЯ ПРОВЕРКА ДУБЛИКАТОВ (НЕ ВЕШАЕТ ТЕЛЕФОН) ---
+  const checkDuplicateAsync = async (text: string): Promise<{ duplicate: PromptData | null, score: number }> => {
+    if (text.length < 10) return { duplicate: null, score: 0 };
+    
+    // 1. Очищаем входной текст один раз
+    const cleanInput = cleanString(text);
     
     let maxSimilarity = 0;
     let match: PromptData | null = null;
 
-    for (const p of prompts) {
-      const sim1 = compareStrings(text, p.originalPrompt);
-      const sim2 = compareStrings(text, p.variants.maleEn || '');
-      const currentMax = Math.max(sim1, sim2);
+    // 2. Проходим в цикле с паузами (чтобы UI не вис)
+    const chunkSize = 50; // Проверяем по 50 штук за раз
+    
+    for (let i = 0; i < prompts.length; i += chunkSize) {
+      // Даем браузеру/телефону "подышать" перед следующей пачкой
+      await new Promise(resolve => setTimeout(resolve, 0));
 
-      if (currentMax > maxSimilarity) {
-        maxSimilarity = currentMax;
-        match = p;
+      const chunk = prompts.slice(i, i + chunkSize);
+      
+      for (const p of chunk) {
+        // Сначала быстрая проверка по длине
+        const pLen = p.originalPrompt.length;
+        if (Math.abs(text.length - pLen) > Math.max(text.length, pLen) * 0.4) continue;
+
+        const cleanP = cleanString(p.originalPrompt);
+        
+        // Моментальная проверка на полное совпадение
+        if (cleanInput === cleanP) {
+            return { duplicate: p, score: 1.0 };
+        }
+
+        // Если не полное, считаем математику
+        const sim = compareStrings(cleanInput, cleanP);
+        
+        if (sim > maxSimilarity) {
+          maxSimilarity = sim;
+          match = p;
+        }
       }
-      if (maxSimilarity > 0.98) break; // Почти полное совпадение
+      
+      // Если нашли очень похожее, прерываем раньше
+      if (maxSimilarity > 0.95) return { duplicate: match, score: maxSimilarity };
     }
     
     return { duplicate: match, score: maxSimilarity };
@@ -195,12 +211,10 @@ function App() {
   // Загрузка
   useEffect(() => {
     if (hasAccess !== true) return;
-
     const loadData = async () => {
       setIsDataLoaded(false); 
       try {
         const cloudData = await loadFromYandexDisk();
-        
         if (cloudData && Array.isArray(cloudData) && cloudData.length > 0) {
           const protectedData = cloudData.map((p: any) => ({ ...p, isSystem: true }));
           setPrompts(protectedData);
@@ -220,7 +234,6 @@ function App() {
     loadData();
   }, [hasAccess]);
 
-  // Черновики (Загружаем только если форма пустая)
   useEffect(() => {
     const draft = localStorage.getItem(DRAFT_KEY);
     if (draft && view === 'create' && !inputPrompt) {
@@ -327,56 +340,56 @@ function App() {
       setView('create'); 
   };
 
-  // --- ФУНКЦИЯ ДЛЯ КНОПОК СОХРАНЕНИЯ (Проверка дублей) ---
-  const validateBeforeSave = (): boolean => {
-    if (forceSave) return true; // Если админ уже нажал "Игнорировать", пропускаем
+  // --- ОБЩИЙ ХЕНДЛЕР СОХРАНЕНИЯ (С ПРОВЕРКОЙ) ---
+  const processSave = async (withAI: boolean) => {
+    if (!inputPrompt.trim()) return;
 
-    const { duplicate, score } = checkDuplicateInternal(inputPrompt);
-    
-    // Порог 0.60 (60%)
-    if (score > 0.60 && duplicate) {
-      setFoundDuplicate(duplicate);
-      setShowDuplicateWarning(true);
-      return false; // Блокируем сохранение, показываем окно
+    // 1. Проверяем дубликаты (Асинхронно, с индикатором загрузки)
+    if (!forceSave) {
+        setLoading(true); // Показываем спиннер, пока идет проверка
+        const { duplicate, score } = await checkDuplicateAsync(inputPrompt);
+        setLoading(false); // Скрываем спиннер
+
+        // Порог 0.60 (60%)
+        if (score > 0.60 && duplicate) {
+            setFoundDuplicate(duplicate);
+            setShowDuplicateWarning(true);
+            return; // Прерываем сохранение
+        }
     }
-    return true;
-  };
-
-  const handleManualSave = async () => {
-    if (!inputPrompt.trim()) return;
-    if (!validateBeforeSave()) return;
 
     setLoading(true);
     try {
-      const text = inputPrompt;
-      const newEntry: PromptData = {
-        id: generateId(), originalPrompt: text, model: selectedModel, category: inputCategory || "Другое", shortTitle: inputTitle || "Без названия",
-        variants: { maleEn: text, maleRu: text, femaleEn: text, femaleRu: text, unisexEn: text, unisexRu: text, male: text, female: text, unisex: text },
-        imageBase64: uploadedImage, note: inputNote.trim(), usageCount: 0, createdAt: Date.now(), generationHistory: [], isSystem: false
-      };
+      let newEntry: PromptData;
+      
+      if (withAI) {
+          // С AI
+          const analysis = await analyzePrompt(inputPrompt);
+          newEntry = {
+            id: generateId(), originalPrompt: inputPrompt, model: selectedModel, category: inputCategory || analysis.category, shortTitle: inputTitle || analysis.shortTitle,
+            variants: analysis.variants, imageBase64: uploadedImage, note: inputNote.trim(), usageCount: 0, createdAt: Date.now(), generationHistory: [], isSystem: false
+          };
+          showToast("Обработано и сохранено!");
+      } else {
+          // Без AI (Ручное)
+          const text = inputPrompt;
+          newEntry = {
+            id: generateId(), originalPrompt: text, model: selectedModel, category: inputCategory || "Другое", shortTitle: inputTitle || "Без названия",
+            variants: { maleEn: text, maleRu: text, femaleEn: text, femaleRu: text, unisexEn: text, unisexRu: text, male: text, female: text, unisex: text },
+            imageBase64: uploadedImage, note: inputNote.trim(), usageCount: 0, createdAt: Date.now(), generationHistory: [], isSystem: false
+          };
+          showToast("Сохранено!");
+      }
+
       setPrompts(prev => [newEntry, ...prev]);
-      showToast("Сохранено!"); 
       clearCreateForm(); 
       setView('list');
-    } catch (error) { showToast("Ошибка", "error"); } finally { setLoading(false); }
-  };
-
-  const handleSave = async () => {
-    if (!inputPrompt.trim()) return;
-    if (!validateBeforeSave()) return;
-
-    setLoading(true);
-    try {
-      const analysis = await analyzePrompt(inputPrompt);
-      const newEntry: PromptData = {
-        id: generateId(), originalPrompt: inputPrompt, model: selectedModel, category: inputCategory || analysis.category, shortTitle: inputTitle || analysis.shortTitle,
-        variants: analysis.variants, imageBase64: uploadedImage, note: inputNote.trim(), usageCount: 0, createdAt: Date.now(), generationHistory: [], isSystem: false
-      };
-      setPrompts(prev => [newEntry, ...prev]);
-      showToast("Обработано и сохранено!"); 
-      clearCreateForm(); 
-      setView('list');
-    } catch (error) { showToast("Ошибка AI", "error"); } finally { setLoading(false); }
+    } catch (error) { 
+        showToast("Ошибка сохранения", "error"); 
+        console.error(error);
+    } finally { 
+        setLoading(false); 
+    }
   };
 
   const handleDelete = (id: string) => {
@@ -417,11 +430,11 @@ function App() {
   if (hasAccess === false) return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-center p-6"><div className="bg-red-500/10 p-6 rounded-2xl border border-red-500/20 max-w-sm"><Lock size={48} className="mx-auto text-red-500 mb-4" /><h2 className="text-2xl font-bold text-white mb-2">Доступ закрыт</h2><a href={CHANNEL_LINK} className="block w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold mt-4">Подписаться</a></div></div>;
   if (!isDataLoaded) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
 
-  // --- ЭКРАН СОЗДАНИЯ (ФИКСИРОВАННЫЙ ОВЕРЛЕЙ) ---
+  // --- ЭКРАН СОЗДАНИЯ ---
   if (view === 'create') {
     return (
       <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto w-full h-full">
-        {/* МОДАЛКА ДУБЛИКАТА */}
+        {/* МОДАЛКА ДУБЛИКАТА (Z-INDEX 150) */}
         {showDuplicateWarning && foundDuplicate && (
           <div className="fixed inset-0 z-[150] bg-black/90 flex items-center justify-center p-4">
             <div className="bg-slate-900 border-2 border-yellow-500/50 rounded-2xl p-6 shadow-2xl max-w-lg w-full relative">
@@ -451,7 +464,6 @@ function App() {
                   onClick={() => { 
                     setShowDuplicateWarning(false); 
                     setFoundDuplicate(null); 
-                    // Переход к найденному
                     setView('list'); 
                     setSearchQuery(foundDuplicate.shortTitle || ''); 
                   }} 
@@ -472,7 +484,7 @@ function App() {
           </div>
           
           <div className="space-y-6 pb-20">
-            {/* Модель */}
+            {/* ... Форма (Модель, Название, Категория, Фото) ... */}
             <div>
               <label className="block text-sm font-medium text-slate-400 mb-2">Модель</label>
               <div className="grid grid-cols-3 gap-2">
@@ -482,7 +494,6 @@ function App() {
               </div>
             </div>
 
-            {/* Название и Категория */}
             <div className="grid grid-cols-1 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-400 mb-2">Название</label>
@@ -495,7 +506,6 @@ function App() {
               </div>
             </div>
 
-            {/* Фото */}
             <div>
               <label className="block text-sm font-medium text-slate-400 mb-2">Референс</label>
               <div className={`border-2 border-dashed rounded-xl p-4 transition-colors ${uploadedImage ? 'border-indigo-500/50 bg-indigo-500/5' : 'border-slate-700 hover:border-slate-600 bg-slate-800'}`}>
@@ -514,13 +524,11 @@ function App() {
               </div>
             </div>
 
-            {/* Промпт */}
             <div>
               <label className="block text-sm font-medium text-slate-400 mb-2">Промпт</label>
               <textarea value={inputPrompt} onChange={(e) => setInputPrompt(e.target.value)} placeholder="Ваш запрос..." className="w-full h-40 bg-slate-900 border border-slate-700 rounded-xl p-4 text-slate-200 focus:border-indigo-500 resize-none" />
             </div>
 
-            {/* Заметка */}
             <div>
                <label className="block text-sm font-medium text-slate-400 mb-2">Заметка</label>
                <textarea value={inputNote} onChange={(e) => setInputNote(e.target.value)} placeholder="Доп. инфо..." className="w-full h-20 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-slate-200 focus:border-indigo-500 resize-none" />
@@ -528,11 +536,11 @@ function App() {
 
             {/* Кнопки */}
             <div className="grid grid-cols-1 gap-3 pt-2 pb-10">
-              <button onClick={handleSave} disabled={loading || !inputPrompt.trim()} className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-bold rounded-xl transition-all shadow-lg shadow-indigo-900/30">
+              <button onClick={() => processSave(true)} disabled={loading || !inputPrompt.trim()} className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 text-white font-bold rounded-xl transition-all shadow-lg shadow-indigo-900/30">
                 {loading ? <Loader2 className="animate-spin inline mr-2" /> : <Sparkles className="inline mr-2" />} Сохранить и обработать
               </button>
               
-              <button onClick={handleManualSave} disabled={loading || !inputPrompt.trim()} className="w-full py-3 bg-emerald-600/80 hover:bg-emerald-500 disabled:bg-slate-800 text-white font-medium rounded-xl transition-all">
+              <button onClick={() => processSave(false)} disabled={loading || !inputPrompt.trim()} className="w-full py-3 bg-emerald-600/80 hover:bg-emerald-500 disabled:bg-slate-800 text-white font-medium rounded-xl transition-all">
                 {loading ? <Loader2 className="animate-spin inline mr-2" /> : <Save className="inline mr-2" />} Просто сохранить
               </button>
             </div>
@@ -550,8 +558,7 @@ function App() {
 
       <header className="sticky top-0 z-40 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 shadow-md">
         <div className="max-w-5xl mx-auto px-4 py-3 flex flex-col gap-3">
-          
-          {/* Верхняя строка: Лого + Кнопки */}
+          {/* ... Шапка (Лого, кнопки базы, фильтры) - без изменений ... */}
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-2 cursor-pointer" onClick={() => scrollToTop()}>
                 <div className="bg-indigo-600 p-1.5 rounded-lg"><Sparkles className="text-white w-4 h-4" /></div>
@@ -566,14 +573,13 @@ function App() {
                 {isAdmin ? (
                   <button onClick={async () => { if(!confirm("Перезаписать?")) return; await saveToYandexDisk(prompts); showToast("Сохранено (Main)"); }} className="p-2 text-white bg-red-600 rounded-lg shadow-md"><Cloud size={18} /></button>
                 ) : (
-                  <button onClick={async () => { /* User copy logic */ }} className="p-2 text-slate-900 bg-yellow-400 rounded-lg shadow-md"><Cloud size={18} /></button>
+                  <button onClick={async () => { /* User copy */ }} className="p-2 text-slate-900 bg-yellow-400 rounded-lg shadow-md"><Cloud size={18} /></button>
                 )}
                 
                 {isAdmin && <label className="p-2 text-white bg-emerald-600 rounded-lg cursor-pointer"><HardDriveUpload size={18} /><input type="file" accept=".json" onChange={handleImport} className="hidden" /></label>}
             </div>
           </div>
           
-          {/* Нижняя строка: Поиск и Фильтры */}
           <div className="flex gap-2">
              <div className="relative flex-grow">
                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
@@ -610,7 +616,7 @@ function App() {
         </div>
       </main>
 
-      {/* FAB: КНОПКА СОЗДАНИЯ (ВСЕГДА ВИДНА ВНИЗУ) */}
+      {/* FAB: КНОПКА СОЗДАНИЯ */}
       <button 
         onClick={handleOpenCreate} 
         className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-2xl shadow-indigo-900/50 hover:scale-110 active:scale-95 transition-all"
