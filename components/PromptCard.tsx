@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { PromptData, VALID_CATEGORIES, AspectRatio, GeneratedImage } from '../types';
 import { Copy, Check, Trash2, Image as ImageIcon, X, Maximize2, Clock, Edit2, Play, Loader2, Upload, Pencil, ZoomIn, ZoomOut, Download, RotateCcw, StickyNote, History, ChevronRight, ChevronDown, Scaling, Languages, Lock, Aperture } from 'lucide-react';
 import { generateNanoBananaImage } from '../services/geminiService';
+// ИМПОРТ ФУНКЦИИ ПОЛУЧЕНИЯ ССЫЛКИ
+import { getImageUrlFromYandex } from '../services/yandexDiskService';
 
 enum GenderVariant {
   Male = 'Male',
@@ -29,11 +31,12 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const [activeModalImage, setActiveModalImage] = useState<string | null>(null);
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
+  // Стейт для картинки с облака
+  const [cloudImageUrl, setCloudImageUrl] = useState<string | null>(null);
+
   // Testing State
   const [testReferenceImage, setTestReferenceImage] = useState<string | null>(null);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
-  
-  // НОВОЕ: Выбор модели (по умолчанию Pollinations)
   const [genModel, setGenModel] = useState<ModelProvider>('pollinations');
   
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
@@ -67,6 +70,18 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
      return data.variants.unisexEn || data.variants.unisex;
   };
 
+  // Эффект для загрузки картинки из облака, если есть путь
+  useEffect(() => {
+    if (data.imagePath && !data.imageBase64 && !cloudImageUrl) {
+        getImageUrlFromYandex(data.imagePath).then(url => {
+            if (url) setCloudImageUrl(url);
+        });
+    }
+  }, [data.imagePath]);
+
+  // Финальная ссылка на картинку (Приоритет: Облако -> Base64)
+  const finalImageSrc = cloudImageUrl || data.imageBase64;
+
   useEffect(() => {
     if (!activeModalImage) {
       setZoomLevel(1);
@@ -93,7 +108,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
       const promptToUse = getGenerationText();
       if (!promptToUse) throw new Error("Промпт пустой");
 
-      // ПЕРЕДАЕМ ВЫБРАННУЮ МОДЕЛЬ (genModel)
       const result = await generateNanoBananaImage(promptToUse, testReferenceImage, aspectRatio, genModel);
       
       setGeneratedImage(result.url);
@@ -118,9 +132,9 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     }
   };
   
-  // --- Handlers (Ref, Zoom, etc) ---
+  // Handlers
   const handleRefUpload = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => setTestReferenceImage(reader.result as string); reader.readAsDataURL(file); }};
-  const handleMainImageDownload = (e: React.MouseEvent) => { e.stopPropagation(); if (data.imageBase64) { const link = document.createElement('a'); link.href = data.imageBase64; link.download = `${data.shortTitle}_ref.png`; document.body.appendChild(link); link.click(); document.body.removeChild(link); }};
+  const handleMainImageDownload = (e: React.MouseEvent) => { e.stopPropagation(); if (finalImageSrc) { const link = document.createElement('a'); link.href = finalImageSrc; link.download = `${data.shortTitle}_ref.png`; document.body.appendChild(link); link.click(); document.body.removeChild(link); }};
   const handleCardMouseMove = (e: React.MouseEvent<HTMLDivElement>) => { if (!cardRef.current) return; const rect = cardRef.current.getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top; const centerX = rect.width / 2; const centerY = rect.height / 2; setRotateX(((y - centerY) / centerY) * -3); setRotateY(((x - centerX) / centerX) * 3); };
   const handleCardMouseEnter = () => setIsHovered(true);
   const handleCardMouseLeave = () => { setIsHovered(false); setRotateX(0); setRotateY(0); };
@@ -147,8 +161,8 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                <div className={`flex items-center justify-center w-8 h-8 rounded-full font-bold text-sm border ${data.isSystem ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50' : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50'}`}>#{index + 1}</div>
                <div className="text-xs text-slate-400 font-mono bg-slate-900 px-2 py-1 rounded">{data.model}</div>
             </div>
-            <div className={`w-full aspect-square rounded-lg overflow-hidden bg-slate-900 border border-slate-700 relative group ${data.imageBase64 ? 'cursor-pointer' : ''}`} onClick={() => data.imageBase64 && setActiveModalImage(data.imageBase64)}>
-              {data.imageBase64 ? (<><img src={data.imageBase64} alt={data.shortTitle} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/><div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100"><button onClick={handleMainImageDownload} className="absolute top-2 left-2 p-1.5 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md z-10"><Download size={16} /></button><button className="p-2 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md transform scale-90 group-hover:scale-100"><Maximize2 size={24} /></button></div></>) : (<div className="w-full h-full flex flex-col items-center justify-center text-slate-500"><ImageIcon size={32} /><span className="text-xs mt-2">Нет фото</span></div>)}
+            <div className={`w-full aspect-square rounded-lg overflow-hidden bg-slate-900 border border-slate-700 relative group ${finalImageSrc ? 'cursor-pointer' : ''}`} onClick={() => finalImageSrc && setActiveModalImage(finalImageSrc)}>
+              {finalImageSrc ? (<><img src={finalImageSrc} alt={data.shortTitle} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/><div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100"><button onClick={handleMainImageDownload} className="absolute top-2 left-2 p-1.5 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md z-10"><Download size={16} /></button><button className="p-2 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md transform scale-90 group-hover:scale-100"><Maximize2 size={24} /></button></div></>) : (<div className="w-full h-full flex flex-col items-center justify-center text-slate-500"><ImageIcon size={32} /><span className="text-xs mt-2">Нет фото</span></div>)}
             </div>
             <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-auto"><Clock size={10} /><span>{formatDate(data.createdAt)}</span></div>
           </div>
@@ -202,7 +216,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                  </div>
                  <button onClick={handleTestGeneration} disabled={isGenerating} className={`w-full h-10 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${isGenerating ? 'bg-slate-700 text-slate-400' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg'}`}>{isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} fill="currentColor" />} {isGenerating ? 'Wait...' : 'Генерировать'}</button>
                  
-                 {/* ВЫБОР РАЗМЕРА И МОДЕЛИ */}
                  <div className="flex gap-2 h-8 w-full">
                     <div className="relative flex-1">
                       <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value as AspectRatio)} className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-[10px] text-slate-300 outline-none appearance-none">{aspectRatioOptions.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}</select>
