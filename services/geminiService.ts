@@ -1,7 +1,6 @@
 // 1. АНАЛИЗ ТЕКСТА (Через OpenRouter / Qwen)
 export const analyzePrompt = async (promptText: string) => {
   try {
-    // Шлем запрос на наш новый файл openrouter.js
     const response = await fetch('/api/openrouter', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -19,7 +18,7 @@ export const analyzePrompt = async (promptText: string) => {
   } catch (error) {
     console.error("AI Analysis Error:", error);
     
-    // Заглушка при ошибке (чтобы интерфейс не падал)
+    // Заглушка при ошибке
     return {
       shortTitle: "Без обработки",
       category: "Другое",
@@ -32,7 +31,6 @@ export const analyzePrompt = async (promptText: string) => {
   }
 };
 
-// Функция расчета размеров
 const getDimensions = (ratio: string) => {
   switch (ratio) {
     case '16:9': return { w: 1280, h: 720 };
@@ -45,27 +43,52 @@ const getDimensions = (ratio: string) => {
   }
 };
 
-// 2. ГЕНЕРАЦИЯ КАРТИНКИ (Pollinations Flux)
+// 2. ГЕНЕРАЦИЯ КАРТИНКИ (Мульти-модельная)
 export const generateNanoBananaImage = async (
   prompt: string, 
   refImage?: string | null, 
-  aspectRatio: string = '1:1', 
-  upscale: boolean = false
+  aspectRatio: string = '1:1',
+  provider: 'pollinations' | 'huggingface' = 'pollinations'
 ) => {
   try {
     const { w, h } = getDimensions(aspectRatio);
     const seed = Math.floor(Math.random() * 100000);
-    const encodedPrompt = encodeURIComponent(prompt);
 
-    let imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux`;
+    // --- ВАРИАНТ 1: POLLINATIONS (Быстро) ---
+    if (provider === 'pollinations') {
+        const encodedPrompt = encodeURIComponent(prompt);
+        let imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux`;
+        
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return { url: imageUrl, prompt: prompt, createdAt: Date.now() };
+    }
 
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // --- ВАРИАНТ 2: HUGGING FACE (Качественно) ---
+    if (provider === 'huggingface') {
+        // Улучшаем промпт для HF, так как он "голый"
+        const enhancedPrompt = `${prompt}, high quality, 8k, masterpiece, sharp focus, detailed texture`;
+        
+        const response = await fetch('/api/huggingface', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                prompt: enhancedPrompt,
+                width: w,
+                height: h
+            })
+        });
 
-    return {
-      url: imageUrl,
-      prompt: prompt,
-      createdAt: Date.now()
-    };
+        if (!response.ok) {
+            const err = await response.json();
+            throw new Error(err.error || "Ошибка HF");
+        }
+
+        const data = await response.json();
+        return { url: data.url, prompt: prompt, createdAt: Date.now() };
+    }
+
+    throw new Error("Неизвестный провайдер");
+
   } catch (error) {
     console.error("Image Gen Error:", error);
     throw error;
