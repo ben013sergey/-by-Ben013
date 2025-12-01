@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { PromptData, VALID_CATEGORIES, AspectRatio, GeneratedImage } from '../types';
-import { Copy, Check, Trash2, Image as ImageIcon, X, Maximize2, Clock, Edit2, Play, Loader2, Upload, Pencil, ZoomIn, ZoomOut, Download, RotateCcw, StickyNote, History, ChevronRight, ChevronDown, Scaling, Languages, Lock, Aperture } from 'lucide-react';
+import { Copy, Check, Trash2, Image as ImageIcon, X, Maximize2, Clock, Edit2, Play, Loader2, Upload, Pencil, ZoomIn, ZoomOut, Download, RotateCcw, StickyNote, Scaling, Languages, Lock, Aperture } from 'lucide-react';
 import { generateNanoBananaImage } from '../services/geminiService';
-// ИМПОРТ ФУНКЦИИ ПОЛУЧЕНИЯ ССЫЛКИ
-import { getImageUrlFromYandex } from '../services/yandexDiskService';
+// ИМПОРТ ФУНКЦИИ ПРОКСИ
+import { getProxyImageUrl } from '../services/yandexDiskService';
 
 enum GenderVariant {
   Male = 'Male',
@@ -31,14 +31,14 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const [activeModalImage, setActiveModalImage] = useState<string | null>(null);
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
-  // Стейт для картинки с облака
-  const [cloudImageUrl, setCloudImageUrl] = useState<string | null>(null);
+  // Ссылка на картинку через прокси
+  const finalImageSrc = data.imagePath 
+    ? getProxyImageUrl(data.imagePath) 
+    : data.imageBase64;
 
-  // Testing State
   const [testReferenceImage, setTestReferenceImage] = useState<string | null>(null);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1');
   const [genModel, setGenModel] = useState<ModelProvider>('pollinations');
-  
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
@@ -70,18 +70,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
      return data.variants.unisexEn || data.variants.unisex;
   };
 
-  // Эффект для загрузки картинки из облака, если есть путь
-  useEffect(() => {
-    if (data.imagePath && !data.imageBase64 && !cloudImageUrl) {
-        getImageUrlFromYandex(data.imagePath).then(url => {
-            if (url) setCloudImageUrl(url);
-        });
-    }
-  }, [data.imagePath]);
-
-  // Финальная ссылка на картинку (Приоритет: Облако -> Base64)
-  const finalImageSrc = cloudImageUrl || data.imageBase64;
-
   useEffect(() => {
     if (!activeModalImage) {
       setZoomLevel(1);
@@ -112,7 +100,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
       
       setGeneratedImage(result.url);
       onUsageUpdate(data.id);
-      
       const newHistoryItem: GeneratedImage = {
         id: Date.now().toString(),
         url: result.url,
@@ -120,11 +107,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
         aspectRatio: aspectRatio
       };
       onAddHistory(data.id, newHistoryItem);
-      
-      if (!showHistory && (data.generationHistory?.length || 0) > 0) {
-        setShowHistory(true);
-      }
-
+      if (!showHistory && (data.generationHistory?.length || 0) > 0) setShowHistory(true);
     } catch (e: any) {
       setGenError(e.message || "Ошибка генерации.");
     } finally {
@@ -132,7 +115,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     }
   };
   
-  // Handlers
   const handleRefUpload = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => setTestReferenceImage(reader.result as string); reader.readAsDataURL(file); }};
   const handleMainImageDownload = (e: React.MouseEvent) => { e.stopPropagation(); if (finalImageSrc) { const link = document.createElement('a'); link.href = finalImageSrc; link.download = `${data.shortTitle}_ref.png`; document.body.appendChild(link); link.click(); document.body.removeChild(link); }};
   const handleCardMouseMove = (e: React.MouseEvent<HTMLDivElement>) => { if (!cardRef.current) return; const rect = cardRef.current.getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top; const centerX = rect.width / 2; const centerY = rect.height / 2; setRotateX(((y - centerY) / centerY) * -3); setRotateY(((x - centerX) / centerX) * 3); };
