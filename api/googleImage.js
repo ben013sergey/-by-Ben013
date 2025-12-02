@@ -13,51 +13,41 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Нет ключа GEMINIGEN_API_KEY" });
   }
 
-  // 2. Правильный URL из документации
+  // 2. URL API
   const URL = "https://api.geminigen.ai/uapi/v1/generate_image";
 
-  // 3. Формируем FormData (как в примере axios из документации)
-  // В Node.js 18+ FormData встроен глобально
+  // 3. Формируем FormData
   const formData = new FormData();
   
   formData.append("prompt", prompt);
-  formData.append("model", "imagen-flash"); // Модель, которую ты просил
   
-  // Передаем соотношение сторон (16:9, 1:1 и т.д.)
-  // Если придет что-то нестандартное, ставим 1:1
+  // === ИЗМЕНЕНИЕ: Пробуем модель imagen-pro ===
+  formData.append("model", "imagen-pro"); 
+  // ============================================
+  
   formData.append("aspect_ratio", aspectRatio || "1:1");
-  
-  // Можно добавить стиль по умолчанию, чтобы было красивее
   formData.append("style", "Photorealistic");
 
-  /* 
-     ВАЖНО ПРО КАРТИНКУ (Image-to-Image):
-     В документации, которую ты скинул (Generate Image), пример только для текста.
-     Поля для загрузки файла обычно называются "image" или "file".
-     Я добавлю попытку отправить картинку, если она есть, но если API 
-     её не примет, он просто сгенерирует по тексту.
-  */
+  // Обработка картинки для Image-to-Image (если загружена)
   if (image) {
-      // Превращаем base64 обратно в Blob, чтобы отправить как файл
       try {
         const base64Data = image.split(',')[1];
         const buffer = Buffer.from(base64Data, 'base64');
         const blob = new Blob([buffer], { type: 'image/png' });
-        formData.append("input_image", blob, "input.png"); // Пробуем имя поля input_image
+        formData.append("input_image", blob, "input.png");
       } catch (e) {
         console.error("Ошибка обработки картинки:", e);
       }
   }
 
   try {
-    console.log(`Sending to GeminiGen: ${prompt} [${aspectRatio}]`);
+    console.log(`Sending to GeminiGen (imagen-pro): ${prompt.substring(0, 50)}...`);
 
     // 4. Отправляем запрос
     const response = await fetch(URL, {
       method: "POST",
       headers: {
-        "x-api-key": API_KEY // Авторизация через header
-        // Content-Type ставить НЕ НУЖНО, fetch сам поставит multipart/form-data boundary
+        "x-api-key": API_KEY 
       },
       body: formData,
     });
@@ -69,10 +59,8 @@ export default async function handler(req, res) {
     }
 
     const data = await response.json();
-    console.log("GeminiGen Response:", JSON.stringify(data).substring(0, 200));
-
-    // 5. Достаем ссылку на картинку
-    // В документации сказано, что поле называется "generate_result"
+    
+    // 5. Достаем ссылку
     const imageUrl = data.generate_result;
 
     if (imageUrl) {
