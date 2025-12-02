@@ -59,7 +59,13 @@ export const generateNanoBananaImage = async (
 
     // --- ВАРИАНТ 1: FAST (Pollinations - Flux) ---
     if (provider === 'pollinations') {
-        imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux`;
+        let url = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux`;
+        // Если есть референс, Pollinations тоже умеет его принимать (но работает нестабильно, поэтому можно пока не передавать или добавить &image=...)
+        if (refImage) {
+            // Pollinations требует URL картинки, а у нас base64. 
+            // Поэтому для Pollinations референс пока пропускаем или используем только для Google.
+        }
+        imageUrl = url;
     }
 
     // --- ВАРИАНТ 2: HQ (Pollinations - Flux Realism) ---
@@ -68,14 +74,16 @@ export const generateNanoBananaImage = async (
         imageUrl = `https://image.pollinations.ai/prompt/${hqPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux-realism&enhance=true`;
     }
 
-    // --- ВАРИАНТ 3: GOOGLE (Nano Banana / Imagen 3) ---
+    // --- ВАРИАНТ 3: GOOGLE (Nano Banana / Gemini 2.5 Flash Image) ---
     else if (provider === 'google') {
+        // Отправляем запрос на наш API
         const response = await fetch('/api/googleImage', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
                 prompt: prompt,
-                aspectRatio: aspectRatio 
+                aspectRatio: aspectRatio,
+                image: refImage // <-- ВАЖНО: Передаем картинку, если она есть
             }),
         });
 
@@ -85,10 +93,10 @@ export const generateNanoBananaImage = async (
         }
 
         const data = await response.json();
-        imageUrl = data.url; // Google сразу возвращает Base64 картинку
+        imageUrl = data.url; // Google сразу возвращает Base64
     }
 
-    // Искусственная задержка только для Pollinations, т.к. Google сам по себе не моментальный
+    // Искусственная задержка только для Pollinations
     if (provider !== 'google') {
         await new Promise(resolve => setTimeout(resolve, 1500));
     }
