@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  // Настройка CORS (чтобы фронтенд мог обращаться к этому API)
+  // Настройка CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -13,19 +13,21 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Нет ключа GOOGLE_AI_KEY в настройках" });
   }
 
-  // Google Imagen 3 поддерживает конкретные соотношения сторон
-  let googleRatio = "1:1";
+  // Для Gemini 2.0 Flash соотношение сторон лучше указывать прямо в промпте,
+  // так как это мультимодальная модель, а не чистый генератор картинок.
+  let ratioText = "";
   switch (aspectRatio) {
-      case "16:9": googleRatio = "16:9"; break;
-      case "9:16": googleRatio = "9:16"; break;
-      case "4:3":  googleRatio = "4:3"; break;
-      case "3:4":  googleRatio = "3:4"; break;
-      case "21:9": googleRatio = "16:9"; break; // Google не поддерживает 21:9 напрямую, берем ближайшее
-      default:     googleRatio = "1:1"; break;
+      case "16:9": ratioText = "Wide aspect ratio 16:9"; break;
+      case "9:16": ratioText = "Tall aspect ratio 9:16"; break;
+      case "4:3":  ratioText = "Aspect ratio 4:3"; break;
+      case "3:4":  ratioText = "Aspect ratio 3:4"; break;
+      default:     ratioText = "Square aspect ratio 1:1"; break;
   }
 
-  // URL для модели Imagen 3
-  const URL = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${API_KEY}`;
+  // Используем новейшую модель Gemini 2.0 Flash Experimental
+  // Она доступна бесплатно и умеет генерировать картинки нативно.
+  const MODEL = "gemini-2.0-flash-exp";
+  const URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
 
   try {
     const response = await fetch(URL, {
@@ -34,31 +36,42 @@ export default async function handler(req, res) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        instances: [
-          { prompt: prompt },
-        ],
-        parameters: {
-          sampleCount: 1,
-          aspectRatio: googleRatio,
-          // personGeneration: "allow_adult", // Можно раскомментировать, если нужно снять цензуру на людей
-        },
+        contents: [{
+          parts: [{ 
+            text: `Generate a photorealistic image of: ${prompt}. ${ratioText}. High quality, detailed.` 
+          }]
+        }],
+        // Явно просим модель вернуть картинку (если поддерживается API версии)
+        // Но даже без этого промпт "Generate an image" обычно работает в 2.0 Flash
+        generationConfig: {
+          responseModalities: ["IMAGE"] 
+        }
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
       console.error("Google API Error:", errText);
+      
+      // Если 2.0 Flash еще недоступна на этом ключе, пробуем обычный Flash 1.5 (но он не рисует)
+      // Или возвращаем понятную ошибку
       throw new Error(`Google API Error: ${response.status} ${errText}`);
     }
 
     const data = await response.json();
 
-    // Google возвращает картинку в base64
-    if (data.predictions && data.predictions[0] && data.predictions[0].bytesBase64Encoded) {
-      const base64Image = `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
+    // Разбираем ответ Gemini 2.0. Картинка приходит как inlineData
+    // Структура: candidates[0].content.parts[0].inlineData.data (base64)
+    
+    const parts = data?.candidates?.[0]?.content?.parts;
+    const imagePart = parts?.find(p => p.inlineData && p.inlineData.mimeType.startsWith('image'));
+
+    if (imagePart && imagePart.inlineData && imagePart.inlineData.data) {
+      const base64Image = `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
       return res.status(200).json({ url: base64Image });
     } else {
-      throw new Error("Google вернул пустой ответ (картинка не сгенерирована)");
+      console.log("Full Response:", JSON.stringify(data, null, 2));
+      throw new Error("Модель не вернула картинку. Возможно, запрос был заблокирован фильтрами безопасности.");
     }
 
   } catch (error) {
