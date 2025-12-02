@@ -1,8 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { PromptData, VALID_CATEGORIES, AspectRatio, GeneratedImage } from '../types';
-import { Copy, Check, Trash2, Image as ImageIcon, X, Maximize2, Clock, Edit2, Play, Loader2, Upload, Pencil, ZoomIn, ZoomOut, Download, RotateCcw, StickyNote, Scaling, Languages, Lock, Aperture } from 'lucide-react';
+import { Copy, Check, Trash2, Image as ImageIcon, X, Maximize2, Clock, Edit2, Play, Loader2, Upload, Pencil, ZoomIn, ZoomOut, Download, RotateCcw, StickyNote, Scaling, Languages, Lock, Aperture, User } from 'lucide-react';
 import { generateNanoBananaImage } from '../services/geminiService';
-// ИМПОРТ ФУНКЦИИ ПРОКСИ
 import { getProxyImageUrl } from '../services/yandexDiskService';
 
 enum GenderVariant {
@@ -146,10 +145,18 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
             <div className={`w-full aspect-square rounded-lg overflow-hidden bg-slate-900 border border-slate-700 relative group ${finalImageSrc ? 'cursor-pointer' : ''}`} onClick={() => finalImageSrc && setActiveModalImage(finalImageSrc)}>
               {finalImageSrc ? (<><img src={finalImageSrc} alt={data.shortTitle} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/><div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100"><button onClick={handleMainImageDownload} className="absolute top-2 left-2 p-1.5 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md z-10"><Download size={16} /></button><button className="p-2 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md transform scale-90 group-hover:scale-100"><Maximize2 size={24} /></button></div></>) : (<div className="w-full h-full flex flex-col items-center justify-center text-slate-500"><ImageIcon size={32} /><span className="text-xs mt-2">Нет фото</span></div>)}
             </div>
-            <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-auto"><Clock size={10} /><span>{formatDate(data.createdAt)}</span></div>
+            {/* АВТОР ПРОМПТА (ТОЛЬКО ДЛЯ АДМИНА) */}
+            {isAdmin && data.author && (
+                <div className="flex items-center gap-1 mt-auto px-2 py-1 bg-slate-900/80 rounded border border-indigo-500/30 text-[10px] text-indigo-300">
+                    <User size={10} />
+                    <span>by {data.author}</span>
+                </div>
+            )}
+            <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-1"><Clock size={10} /><span>{formatDate(data.createdAt)}</span></div>
           </div>
 
           <div className="flex-grow flex flex-col min-w-0">
+            {/* ... rest of the card content ... (остальной код без изменений) */}
             <div className="flex justify-between items-start mb-3">
               <div className="flex flex-col relative flex-grow mr-4 min-w-0">
                 <div className="group relative inline-flex items-center gap-1 mb-1 cursor-pointer" onClick={() => canEdit && setShowCategoryDropdown(!showCategoryDropdown)} tabIndex={0}>
