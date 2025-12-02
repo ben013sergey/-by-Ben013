@@ -7,87 +7,82 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const { prompt, aspectRatio, image } = req.body;
-  const API_KEY = process.env.GOOGLE_AI_KEY;
+  
+  // Берем ключ GeminiGen
+  const API_KEY = process.env.GEMINIGEN_API_KEY;
 
   if (!API_KEY) {
-    return res.status(500).json({ error: "Нет ключа GOOGLE_AI_KEY в настройках" });
+    return res.status(500).json({ error: "Нет ключа GEMINIGEN_API_KEY в настройках" });
   }
 
-  // Формируем текст про соотношение сторон
+  // GeminiGen API Endpoint
+  const URL = "https://api.geminigen.ai/uapi/v1/generate";
+
+  // Формируем описание соотношения сторон для добавления в промпт
+  // (Так надежнее, если API вдруг не примет параметр aspect_ratio напрямую)
   let ratioText = "";
   switch (aspectRatio) {
-      case "16:9": ratioText = "Aspect ratio 16:9."; break;
-      case "9:16": ratioText = "Aspect ratio 9:16."; break;
-      case "4:3":  ratioText = "Aspect ratio 4:3."; break;
-      case "3:4":  ratioText = "Aspect ratio 3:4."; break;
-      default:     ratioText = "Square aspect ratio 1:1."; break;
+      case "16:9": ratioText = "--ar 16:9"; break;
+      case "9:16": ratioText = "--ar 9:16"; break;
+      case "4:3":  ratioText = "--ar 4:3"; break;
+      case "3:4":  ratioText = "--ar 3:4"; break;
+      default:     ratioText = "--ar 1:1"; break;
   }
 
-  // Точное название модели из документации
-  const MODEL = "gemini-2.5-flash-image";
-  const URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
+  // Собираем тело запроса согласно документации GeminiGen
+  const requestBody = {
+    type: "image",
+    model: "imagen-flash", // Та самая модель Nano Banana
+    prompt: `${prompt} ${ratioText}`, 
+    aspect_ratio: aspectRatio || "1:1" // Попробуем передать и как параметр
+  };
+
+  // Если есть картинка (режим Image-to-Image)
+  if (image) {
+      // Обычно такие сервисы ожидают либо URL, либо Base64.
+      // Попробуем передать как base64 в поле image
+      requestBody.image = image; 
+      // Добавим пометку в промпт, чтобы модель поняла задачу
+      requestBody.prompt = `Enhance this image: ${prompt}`;
+  }
 
   try {
-    // Собираем части запроса (parts)
-    const parts = [];
-
-    // 1. Текст промпта
-    parts.push({ 
-        text: `${prompt}. ${ratioText} High quality, detailed.` 
-    });
-
-    // 2. Если есть картинка - добавляем её (режим Image-to-Image)
-    if (image) {
-        // Картинка приходит как "data:image/png;base64,iVBOR..."
-        // Нам нужно отделить заголовок от самих данных
-        const [meta, data] = image.split(',');
-        // Пытаемся понять mimeType (png или jpeg), по умолчанию png
-        const mimeType = meta.includes('jpeg') || meta.includes('jpg') ? 'image/jpeg' : 'image/png';
-
-        if (data) {
-            parts.push({
-                inlineData: {
-                    mimeType: mimeType,
-                    data: data
-                }
-            });
-        }
-    }
+    console.log("Sending request to GeminiGen...", JSON.stringify(requestBody).substring(0, 100));
 
     const response = await fetch(URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "x-api-key": API_KEY // Важно: авторизация через этот заголовок
       },
-      body: JSON.stringify({
-        contents: [{
-          parts: parts
-        }],
-        // Принудительно просим вернуть картинку
-        generationConfig: {
-            responseModalities: ["IMAGE"]
-        }
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error("Google API Error:", errText);
-      throw new Error(`Google API Error: ${response.status} ${errText}`);
+      console.error("GeminiGen API Error:", errText);
+      throw new Error(`GeminiGen Error: ${response.status} ${errText}`);
     }
 
-    const resultData = await response.json();
+    const data = await response.json();
+    console.log("GeminiGen Response:", JSON.stringify(data).substring(0, 200));
 
-    // Парсим ответ (inlineData)
-    const contentParts = resultData?.candidates?.[0]?.content?.parts;
-    const imagePart = contentParts?.find(p => p.inlineData && p.inlineData.mimeType.startsWith('image'));
+    // Логика разбора ответа зависит от того, что вернет GeminiGen.
+    // Обычно это { url: "..." } или { data: [{ url: "..." }] }
+    
+    let finalUrl = null;
 
-    if (imagePart && imagePart.inlineData && imagePart.inlineData.data) {
-      const base64Image = `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`;
-      return res.status(200).json({ url: base64Image });
+    // Вариант 1: Прямая ссылка в url
+    if (data.url) finalUrl = data.url;
+    // Вариант 2: Ссылка внутри data (как у OpenAI)
+    else if (data.data && data.data[0] && data.data[0].url) finalUrl = data.data[0].url;
+    // Вариант 3: Base64 внутри data
+    else if (data.data && data.data[0] && data.data[0].b64_json) finalUrl = `data:image/png;base64,${data.data[0].b64_json}`;
+
+    if (finalUrl) {
+        return res.status(200).json({ url: finalUrl });
     } else {
-      console.log("Full Response:", JSON.stringify(resultData, null, 2));
-      throw new Error("Модель не вернула картинку (возможно, сработал фильтр безопасности).");
+        throw new Error("Не удалось найти картинку в ответе GeminiGen");
     }
 
   } catch (error) {
