@@ -20,7 +20,6 @@ export interface PromptVariants {
   femaleRu?: string;
   unisexEn?: string;
   unisexRu?: string;
-  // Старые поля
   male?: string;
   female?: string;
   unisex?: string;
@@ -35,7 +34,6 @@ export interface PromptData {
   
   variants: PromptVariants;
   
-  // Для старых записей оставляем base64, для новых - imagePath
   imageBase64: string | null;
   imagePath?: string | null;
 
@@ -45,6 +43,7 @@ export interface PromptData {
   createdAt: number;
   
   isSystem?: boolean; 
+  author?: string; // НОВОЕ ПОЛЕ: Автор промпта
 }
 
 export interface GeminiAnalysisResult {
