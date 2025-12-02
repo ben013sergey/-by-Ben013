@@ -43,12 +43,12 @@ const getDimensions = (ratio: string) => {
   }
 };
 
-// 2. ГЕНЕРАЦИЯ КАРТИНКИ (Pollinations v2)
+// 2. ГЕНЕРАЦИЯ КАРТИНКИ (Pollinations v2 / HuggingFace / Google)
 export const generateNanoBananaImage = async (
   prompt: string, 
   refImage?: string | null, 
   aspectRatio: string = '1:1',
-  provider: 'pollinations' | 'huggingface' = 'pollinations'
+  provider: 'pollinations' | 'huggingface' | 'google' = 'pollinations'
 ) => {
   try {
     const { w, h } = getDimensions(aspectRatio);
@@ -57,22 +57,41 @@ export const generateNanoBananaImage = async (
 
     let imageUrl = "";
 
-    // --- ВАРИАНТ 1: FAST (Быстро) ---
+    // --- ВАРИАНТ 1: FAST (Pollinations - Flux) ---
     if (provider === 'pollinations') {
-        // Обычный Flux, быстро
         imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux`;
     }
 
-    // --- ВАРИАНТ 2: HQ (Качественно) ---
-    // Мы используем тот же Pollinations, но с параметром enhance=true и моделью flux-realism
-    // Это дает качество лучше, чем HF Free Tier, и работает стабильнее
-    if (provider === 'huggingface') {
+    // --- ВАРИАНТ 2: HQ (Pollinations - Flux Realism) ---
+    else if (provider === 'huggingface') {
         const hqPrompt = encodeURIComponent(`${prompt}, hyperrealistic, 8k resolution, cinematic lighting, sharp focus, masterpiece`);
         imageUrl = `https://image.pollinations.ai/prompt/${hqPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux-realism&enhance=true`;
     }
 
-    // Искусственная задержка для UI (чтобы пользователь понял, что процесс идет)
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // --- ВАРИАНТ 3: GOOGLE (Nano Banana / Imagen 3) ---
+    else if (provider === 'google') {
+        const response = await fetch('/api/googleImage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                prompt: prompt,
+                aspectRatio: aspectRatio 
+            }),
+        });
+
+        if (!response.ok) {
+            const err = await response.text();
+            throw new Error(`Ошибка Google: ${err}`);
+        }
+
+        const data = await response.json();
+        imageUrl = data.url; // Google сразу возвращает Base64 картинку
+    }
+
+    // Искусственная задержка только для Pollinations, т.к. Google сам по себе не моментальный
+    if (provider !== 'google') {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+    }
 
     return {
       url: imageUrl,
