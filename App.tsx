@@ -5,7 +5,7 @@ import {
   HardDriveUpload, CheckCircle2, AlertCircle, Save, ChevronDown, 
   Trash2, X, Download, RefreshCw, Wand2, Code, Database, ChevronUp, 
   Send, Cloud, CloudDownload, Lock, Scaling, AlertTriangle, ArrowLeft,
-  ExternalLink, User
+  ExternalLink
 } from 'lucide-react';
 
 import { PromptData, VALID_CATEGORIES, GeneratedImage, AspectRatio } from './types';
@@ -20,7 +20,7 @@ import {
     uploadImageToYandex, 
     deleteImageFromYandex,
     notifyAdminNewPrompts,
-    getProxyImageUrl 
+    getProxyImageUrl
 } from './services/yandexDiskService';
 
 declare global {
@@ -47,6 +47,8 @@ const ITEMS_PER_PAGE = 20;
 const ADMIN_ID = 439014866; 
 const CHANNEL_LINK = "https://t.me/ben013_promt_gallery"; 
 
+// Вспомогательная функция для конвертации URL -> Base64
+// Используется для вшивания картинок внутрь JSON перед отправкой
 const urlToBase64 = async (url: string): Promise<string | null> => {
   try {
     const response = await fetch(url);
@@ -123,18 +125,17 @@ function App() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
-  
-  // НОВЫЙ ФИЛЬТР ПО АВТОРУ
   const [selectedAuthorFilter, setSelectedAuthorFilter] = useState<string>('all');
-
   const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'with_photo' | 'without_photo' | 'with_notes'>('newest');
   
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
 
+  // Имя пользователя (или Guest)
   const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
   const userId = tgUser?.id;
-  const username = tgUser?.username || tgUser?.first_name || "Guest";
+  const username = tgUser?.username ? `@${tgUser.username}` : (tgUser?.first_name || "Guest");
+  
   const urlParams = new URLSearchParams(window.location.search);
   const urlPass = urlParams.get('uid');
 
@@ -259,7 +260,7 @@ function App() {
               const proxyUrl = getProxyImageUrl(p.imagePath);
               const base64 = await urlToBase64(proxyUrl);
               if (base64) {
-                  p.imageBase64 = base64; 
+                  p.imageBase64 = base64;
                   convertedCount++;
               }
           }
@@ -333,45 +334,51 @@ function App() {
 
   const handleOpenCreate = () => { clearCreateForm(); setView('create'); };
 
-  // --- ЛОГИКА СОХРАНЕНИЯ (ЖЕЛТАЯ КНОПКА) ---
+  // --- СОХРАНЕНИЕ В ОБЛАКО ---
   const handleUserSaveToCloud = async () => {
      if (isAdmin) {
          if(!confirm("Перезаписать ОСНОВНУЮ базу?")) return;
          await saveToYandexDisk(prompts);
          showToast("Основная база обновлена!");
      } else {
-         // Пользователь: Сохраняет только свои новые промпты
-         // ВАЖНО: Копируем массив, чтобы не мутировать стейт
-         const userPrompts = JSON.parse(JSON.stringify(prompts.filter(p => !p.isSystem)));
-         
+         const userPrompts = prompts.filter(p => !p.isSystem);
          if (userPrompts.length === 0) {
              showToast("Нет новых промптов для сохранения", "error");
              return;
          }
 
-         setLoading(true); // Показываем спиннер, т.к. процесс может быть долгим
+         setLoading(true);
          try {
-             // Проходимся и вшиваем картинки обратно в Base64 для автономности файла
-             let convertedCount = 0;
-             for (let p of userPrompts) {
-                 if (p.imagePath && !p.imageBase64) {
-                     const proxyUrl = getProxyImageUrl(p.imagePath);
-                     const base64 = await urlToBase64(proxyUrl);
-                     if (base64) {
-                         p.imageBase64 = base64; 
-                         p.imagePath = null; // Очищаем путь, чтобы админ видел, что это встроенная
-                         convertedCount++;
+             // 1. Копируем массив промптов
+             const exportPrompts = JSON.parse(JSON.stringify(userPrompts));
+             let converted = 0;
+
+             // 2. Вшиваем картинки обратно внутрь (чтобы не было ссылок)
+             for (let p of exportPrompts) {
+                 if (p.imagePath) {
+                     try {
+                         const proxyUrl = getProxyImageUrl(p.imagePath);
+                         const base64 = await urlToBase64(proxyUrl);
+                         if (base64) {
+                             p.imageBase64 = base64;
+                             p.imagePath = null; // Ссылка больше не нужна, картинка внутри
+                             converted++;
+                         }
+                     } catch(e) {
+                         console.error("Failed to embed image for", p.shortTitle);
                      }
                  }
              }
 
              const dateStr = new Date().toISOString().slice(0, 10);
-             const fileName = `suggestion_${username}_${dateStr}.json`;
-
-             await saveToYandexDisk(userPrompts, fileName);
+             const safeUsername = username.replace(/[^a-zA-Z0-9_-]/g, '_');
+             const fileName = `suggestion_${safeUsername}_${dateStr}.json`;
+             
+             // 3. Отправляем один "жирный" файл JSON
+             await saveToYandexDisk(exportPrompts, fileName);
              await notifyAdminNewPrompts(username, fileName, userPrompts.length);
+             showToast(`Отправлено! (Вшито ${converted} фото)`, "success");
 
-             showToast("Отправлено на проверку! (Картинки вшиты)", "success");
          } catch (e) {
              console.error(e);
              showToast("Ошибка отправки", "error");
@@ -409,7 +416,7 @@ function App() {
         createdAt: Date.now(), 
         generationHistory: [], 
         isSystem: false,
-        author: username // Добавляем автора
+        createdBy: username // Метка автора
       };
       setPrompts(prev => [newEntry, ...prev]);
       showToast("Сохранено локально!"); 
@@ -447,7 +454,7 @@ function App() {
         createdAt: Date.now(), 
         generationHistory: [], 
         isSystem: false,
-        author: username // Добавляем автора
+        createdBy: username // Метка автора
       };
       setPrompts(prev => [newEntry, ...prev]);
       showToast("Обработано и сохранено!"); 
@@ -469,12 +476,7 @@ function App() {
   const handleAddHistory = (id: string, img: GeneratedImage) => setPrompts(prev => prev.map(p => p.id === id ? { ...p, generationHistory: [img, ...(p.generationHistory||[])].slice(0,5) } : p));
   const handleUpdatePrompt = (ud: PromptData) => { setPrompts(prev => prev.map(p => p.id === ud.id ? ud : p)); setEditingPrompt(null); };
   
-  const resetFilters = () => { 
-      setSearchQuery(''); 
-      setSelectedCategoryFilter('all'); 
-      setSelectedAuthorFilter('all');
-      setSortOrder('newest'); 
-  };
+  const resetFilters = () => { setSearchQuery(''); setSelectedCategoryFilter('all'); setSelectedAuthorFilter('all'); setSortOrder('newest'); };
 
   // --- ФИЛЬТРАЦИЯ ---
   const allFilteredPrompts = prompts.filter(p => {
@@ -482,8 +484,8 @@ function App() {
     const matches = p.shortTitle.toLowerCase().includes(s) || p.originalPrompt.toLowerCase().includes(s);
     const cat = selectedCategoryFilter === 'all' || p.category === selectedCategoryFilter;
     
-    // Фильтр по автору (только для админа)
-    const authorMatch = !isAdmin || selectedAuthorFilter === 'all' || (p.author === selectedAuthorFilter);
+    // Фильтрация по автору (только если Админ что-то выбрал)
+    const authorMatch = !isAdmin || selectedAuthorFilter === 'all' || (p.createdBy || 'Неизвестно') === selectedAuthorFilter;
 
     return matches && cat && authorMatch;
   }).sort((a, b) => {
@@ -502,8 +504,8 @@ function App() {
 
   const allCategories = Array.from(new Set(prompts.map(p => p.category || 'Без категории'))).sort();
   
-  // Список авторов (уникальный) для фильтра
-  const allAuthors = Array.from(new Set(prompts.map(p => p.author).filter(Boolean))).sort();
+  // Список авторов для фильтра
+  const allAuthors = Array.from(new Set(prompts.map(p => p.createdBy || 'Неизвестно'))).sort();
 
   const visiblePrompts = allFilteredPrompts.slice(0, visibleCount);
   const groupedPrompts = visiblePrompts.reduce((acc, p) => { 
@@ -515,8 +517,6 @@ function App() {
   const sortedGroupKeys = Object.keys(groupedPrompts).sort();
 
   const handleShowMore = () => { setVisibleCount(prev => prev + ITEMS_PER_PAGE); };
-
-  // --- РЕНДЕРИНГ ---
 
   if (hasAccess === null) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
   
@@ -533,7 +533,6 @@ function App() {
   if (!isDataLoaded) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
 
   if (view === 'create') {
-    // (Код формы создания без изменений, кроме того, что теперь в handleSave/ManualSave передается author)
     return (
       <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto w-full h-full">
         <div className="max-w-2xl mx-auto p-4 min-h-screen">
@@ -543,6 +542,7 @@ function App() {
              <div className="w-8"></div>
           </div>
           <div className="space-y-6 pb-20">
+             {/* ФОРМА СОЗДАНИЯ БЕЗ ИЗМЕНЕНИЙ */}
              <div>
               <label className="block text-sm font-medium text-slate-400 mb-2">Модель</label>
               <div className="grid grid-cols-3 gap-2">
@@ -627,22 +627,8 @@ function App() {
             <div className="flex items-center gap-2 mt-1">
                 <button onClick={handleApplyInternalExamples} className="p-2 text-slate-400 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors" title="Сбросить к стандартным примерам"><Database size={18} /></button>
                 <button onClick={async () => { if(!confirm("Загрузить базу?")) return; const data = await loadFromYandexDisk(); if(data) { const protectedData = data.map((p: any) => ({ ...p, isSystem: true })); setPrompts(protectedData); showToast("Обновлено!"); } }} className="p-2 text-white bg-blue-500 hover:bg-blue-400 rounded-lg shadow-md transition-colors" title="Загрузить базу из Яндекс.Диска"><CloudDownload size={18} /></button>
-                <button onClick={handleUserSaveToCloud} disabled={loading} className={`p-2 text-white rounded-lg shadow-md flex items-center gap-1 transition-colors ${isAdmin ? 'bg-red-600 hover:bg-red-500' : 'bg-yellow-500 hover:bg-yellow-400 text-slate-900'}`} title={isAdmin ? "Перезаписать ОСНОВНУЮ базу в облаке" : "Отправить новые промпты админу"}>
-                    {loading ? <Loader2 size={18} className="animate-spin" /> : <Cloud size={18} />}
-                </button>
-                
-                {isAdmin && (
-                    <label className="p-2 text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg cursor-pointer shadow-md transition-colors" title="Импортировать базу из файла (.json)">
-                        <HardDriveUpload size={18} />
-                        <input type="file" accept=".json" onChange={handleImport} className="hidden" />
-                    </label>
-                )}
-
-                {isAdmin && (
-                    <button onClick={handleBackupDatabase} disabled={loading} className="p-2 text-white bg-blue-700 hover:bg-blue-600 rounded-lg shadow-md transition-colors" title="Скачать полную базу с картинками (.json)">
-                       {loading ? <Loader2 size={18} className="animate-spin" /> : <HardDriveDownload size={18} />}
-                    </button>
-                )}
+                <button onClick={handleUserSaveToCloud} className={`p-2 text-white rounded-lg shadow-md flex items-center gap-1 transition-colors ${isAdmin ? 'bg-red-600 hover:bg-red-500' : 'bg-yellow-500 hover:bg-yellow-400 text-slate-900'}`} title={isAdmin ? "Перезаписать ОСНОВНУЮ базу в облаке" : "Отправить новые промпты админу"}><Cloud size={18} /></button>
+                {isAdmin && (<><label className="p-2 text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg cursor-pointer shadow-md transition-colors" title="Импортировать базу из файла (.json)"><HardDriveUpload size={18} /><input type="file" accept=".json" onChange={handleImport} className="hidden" /></label><button onClick={handleBackupDatabase} disabled={loading} className="p-2 text-white bg-blue-700 hover:bg-blue-600 rounded-lg shadow-md transition-colors" title="Скачать полную базу с картинками (.json)">{loading ? <Loader2 size={18} className="animate-spin" /> : <HardDriveDownload size={18} />}</button></>)}
             </div>
           </div>
           
@@ -654,7 +640,6 @@ function App() {
              </div>
              
              <div className="flex gap-2 w-full overflow-x-auto no-scrollbar">
-               {/* КАТЕГОРИИ */}
                <select value={selectedCategoryFilter} onChange={(e) => setSelectedCategoryFilter(e.target.value)} className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-300 flex-grow min-w-[140px]">
                  <option value="all">Все категории ({prompts.length})</option>
                  {allCategories.map(c => (
@@ -662,13 +647,13 @@ function App() {
                  ))}
                </select>
 
-               {/* АВТОРЫ (ТОЛЬКО ДЛЯ АДМИНА) */}
-               {isAdmin && allAuthors.length > 0 && (
-                   <select value={selectedAuthorFilter} onChange={(e) => setSelectedAuthorFilter(e.target.value)} className="bg-slate-900 border border-indigo-500/50 text-indigo-300 rounded-lg px-2 py-2 text-sm flex-grow min-w-[120px]">
-                        <option value="all">Все авторы</option>
-                        {allAuthors.map(author => (
-                            <option key={author as string} value={author as string}>{author}</option>
-                        ))}
+               {/* ФИЛЬТР ПО АВТОРУ ДЛЯ АДМИНА */}
+               {isAdmin && (
+                   <select value={selectedAuthorFilter} onChange={(e) => setSelectedAuthorFilter(e.target.value)} className="bg-slate-950 border border-yellow-500/30 text-yellow-500 rounded-lg px-2 py-2 text-sm flex-grow min-w-[140px]">
+                     <option value="all">Все авторы</option>
+                     {allAuthors.map(a => (
+                        <option key={a} value={a}>{a}</option>
+                     ))}
                    </select>
                )}
 
@@ -679,7 +664,6 @@ function App() {
                   <option value="without_photo">Без фото</option>
                   <option value="with_notes">С прим.</option>
                </select>
-               
                {(searchQuery || selectedCategoryFilter !== 'all' || selectedAuthorFilter !== 'all' || sortOrder !== 'newest') && (
                  <button onClick={resetFilters} className="p-2 bg-slate-950 border border-red-500/30 text-red-400 hover:bg-red-500/10 rounded-lg"><RefreshCw size={18} /></button>
                )}
@@ -715,16 +699,11 @@ function App() {
 
           {visibleCount < allFilteredPrompts.length && (
             <div className="flex flex-col items-center mt-8 mb-12 gap-2">
-                <button 
-                    onClick={handleShowMore}
-                    className="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-full font-medium transition-all shadow-lg border border-slate-700"
-                >
+                <button onClick={handleShowMore} className="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-full font-medium transition-all shadow-lg border border-slate-700">
                     <ChevronDown size={20} />
                     Показать еще ({allFilteredPrompts.length - visibleCount})
                 </button>
-                <span className="text-xs text-slate-500">
-                    Показано {Math.min(visibleCount, allFilteredPrompts.length)} из {allFilteredPrompts.length} промптов
-                </span>
+                <span className="text-xs text-slate-500">Показано {Math.min(visibleCount, allFilteredPrompts.length)} из {allFilteredPrompts.length} промптов</span>
             </div>
           )}
         </div>
