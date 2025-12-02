@@ -10,7 +10,8 @@ enum GenderVariant {
   Unisex = 'Unisex'
 }
 
-type ModelProvider = 'pollinations' | 'huggingface';
+// Добавили 'google' в типы
+type ModelProvider = 'pollinations' | 'huggingface' | 'google';
 
 interface PromptCardProps {
   data: PromptData;
@@ -156,7 +157,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
           </div>
 
           <div className="flex-grow flex flex-col min-w-0">
-            {/* ... rest of the card content ... (остальной код без изменений) */}
+            {/* ... rest of the card content ... */}
             <div className="flex justify-between items-start mb-3">
               <div className="flex flex-col relative flex-grow mr-4 min-w-0">
                 <div className="group relative inline-flex items-center gap-1 mb-1 cursor-pointer" onClick={() => canEdit && setShowCategoryDropdown(!showCategoryDropdown)} tabIndex={0}>
@@ -211,9 +212,14 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                       <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"><Scaling size={12} /></div>
                     </div>
                     <div className="relative flex-1">
-                      <select value={genModel} onChange={(e) => setGenModel(e.target.value as ModelProvider)} className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-[10px] text-slate-300 outline-none appearance-none">
+                      <select 
+                          value={genModel} 
+                          onChange={(e) => setGenModel(e.target.value as ModelProvider)} 
+                          className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-[10px] text-slate-300 outline-none appearance-none"
+                      >
                         <option value="pollinations">Fast (Free)</option>
                         <option value="huggingface">HQ (Flux)</option>
+                        <option value="google">Nano Banana (Google)</option>
                       </select>
                       <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"><Aperture size={12} /></div>
                     </div>
