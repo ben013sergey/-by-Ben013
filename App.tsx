@@ -5,7 +5,7 @@ import {
   HardDriveUpload, CheckCircle2, AlertCircle, Save, ChevronDown, 
   Trash2, X, Download, RefreshCw, Wand2, Code, Database, ChevronUp, 
   Send, Cloud, CloudDownload, Lock, Scaling, AlertTriangle, ArrowLeft,
-  ExternalLink
+  ExternalLink, Heart
 } from 'lucide-react';
 
 import { PromptData, VALID_CATEGORIES, GeneratedImage, AspectRatio } from './types';
@@ -22,6 +22,8 @@ import {
     notifyAdminNewPrompts,
     getProxyImageUrl
 } from './services/yandexDiskService';
+// ИМПОРТ НОВОГО СЕРВИСА (CloudStorage)
+import { tgStorage } from './services/telegramStorage';
 
 declare global {
   interface Window {
@@ -34,8 +36,18 @@ declare global {
             show: () => void;
             hide: () => void;
             onClick: (cb: () => void) => void;
-        }
+        };
         expand: () => void;
+        HapticFeedback?: {
+            impactOccurred: (style: string) => void;
+            notificationOccurred: (type: string) => void;
+            selectionChanged: () => void;
+        };
+        CloudStorage?: {
+            getItem: (key: string, callback: (err: any, value: string) => void) => void;
+            setItem: (key: string, value: string, callback: (err: any, stored: boolean) => void) => void;
+            removeItem: (key: string, callback: (err: any, deleted: boolean) => void) => void;
+        };
       }
     }
   }
@@ -48,7 +60,6 @@ const ADMIN_ID = 439014866;
 const CHANNEL_LINK = "https://t.me/ben013_promt_gallery"; 
 
 // Вспомогательная функция для конвертации URL -> Base64
-// Используется для вшивания картинок внутрь JSON перед отправкой
 const urlToBase64 = async (url: string): Promise<string | null> => {
   try {
     const response = await fetch(url);
@@ -108,11 +119,54 @@ function App() {
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
 
+  // --- ИЗБРАННОЕ (НОВАЯ ФИЧА) ---
+  const [favorites, setFavorites] = useState<string[]>([]);
+
+  // Загружаем избранное из Telegram CloudStorage при старте
+  useEffect(() => {
+    const loadFavorites = async () => {
+      try {
+        const data = await tgStorage.getItem('pv_favorites');
+        if (data) {
+          const parsed = JSON.parse(data);
+          if (Array.isArray(parsed)) {
+            setFavorites(parsed);
+          }
+        }
+      } catch (e) {
+        console.error("Ошибка загрузки избранного:", e);
+      }
+    };
+    loadFavorites();
+  }, []);
+
+  const toggleFavorite = async (id: string) => {
+    // Оптимистичное обновление UI
+    const newFavs = favorites.includes(id) 
+        ? favorites.filter(favId => favId !== id) 
+        : [...favorites, id];
+    
+    setFavorites(newFavs);
+
+    // Вибрация (для приятного отклика)
+    if (window.Telegram?.WebApp?.HapticFeedback) {
+        window.Telegram.WebApp.HapticFeedback.selectionChanged();
+    }
+
+    // Сохранение в облако
+    try {
+        await tgStorage.setItem('pv_favorites', JSON.stringify(newFavs));
+    } catch (e) {
+        console.error("Ошибка сохранения в облако:", e);
+    }
+  };
+  // --------------------------------
+
   const [view, setView] = useState<'list' | 'create'>('list');
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
   const [editingPrompt, setEditingPrompt] = useState<PromptData | null>(null);
-  const [promptsRef, useRef] = useState<PromptData[]>([]); 
+  const promptsRef = useRef<PromptData[]>([]); 
 
   const [inputPrompt, setInputPrompt] = useState('');
   const [inputTitle, setInputTitle] = useState('');
@@ -131,7 +185,6 @@ function App() {
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
 
-  // Имя пользователя (или Guest)
   const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
   const userId = tgUser?.id;
   const username = tgUser?.username ? `@${tgUser.username}` : (tgUser?.first_name || "Guest");
@@ -249,23 +302,17 @@ function App() {
 
   const handleBackupDatabase = async () => {
     if (!confirm("Скачать полную базу (с картинками)? Это займет некоторое время.")) return;
-    
     setLoading(true);
     try {
       const exportData = JSON.parse(JSON.stringify(prompts));
       let convertedCount = 0;
-
       for (let p of exportData) {
           if (p.imagePath && !p.imageBase64) {
               const proxyUrl = getProxyImageUrl(p.imagePath);
               const base64 = await urlToBase64(proxyUrl);
-              if (base64) {
-                  p.imageBase64 = base64;
-                  convertedCount++;
-              }
+              if (base64) { p.imageBase64 = base64; convertedCount++; }
           }
       }
-
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
       const downloadAnchorNode = document.createElement('a');
       const date = new Date().toISOString().slice(0, 10);
@@ -274,14 +321,8 @@ function App() {
       document.body.appendChild(downloadAnchorNode);
       downloadAnchorNode.click();
       downloadAnchorNode.remove();
-      
       showToast(`Скачано! (Вшито ${convertedCount} картинок)`, "success");
-    } catch (e) {
-      console.error(e);
-      showToast("Ошибка экспорта", "error");
-    } finally {
-        setLoading(false);
-    }
+    } catch (e) { console.error(e); showToast("Ошибка экспорта", "error"); } finally { setLoading(false); }
   };
 
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -323,18 +364,11 @@ function App() {
   };
 
   const clearCreateForm = () => {
-    setInputPrompt(''); 
-    setInputTitle(''); 
-    setInputCategory(''); 
-    setInputNote(''); 
-    setUploadedImage(null);
-    setRawImageFile(null);
-    localStorage.removeItem(DRAFT_KEY); 
+    setInputPrompt(''); setInputTitle(''); setInputCategory(''); setInputNote(''); setUploadedImage(null); setRawImageFile(null); localStorage.removeItem(DRAFT_KEY); 
   };
 
   const handleOpenCreate = () => { clearCreateForm(); setView('create'); };
 
-  // --- СОХРАНЕНИЕ В ОБЛАКО ---
   const handleUserSaveToCloud = async () => {
      if (isAdmin) {
          if(!confirm("Перезаписать ОСНОВНУЮ базу?")) return;
@@ -342,49 +376,27 @@ function App() {
          showToast("Основная база обновлена!");
      } else {
          const userPrompts = prompts.filter(p => !p.isSystem);
-         if (userPrompts.length === 0) {
-             showToast("Нет новых промптов для сохранения", "error");
-             return;
-         }
-
+         if (userPrompts.length === 0) { showToast("Нет новых промптов", "error"); return; }
          setLoading(true);
          try {
-             // 1. Копируем массив промптов
              const exportPrompts = JSON.parse(JSON.stringify(userPrompts));
              let converted = 0;
-
-             // 2. Вшиваем картинки обратно внутрь (чтобы не было ссылок)
              for (let p of exportPrompts) {
                  if (p.imagePath) {
                      try {
                          const proxyUrl = getProxyImageUrl(p.imagePath);
                          const base64 = await urlToBase64(proxyUrl);
-                         if (base64) {
-                             p.imageBase64 = base64;
-                             p.imagePath = null; // Ссылка больше не нужна, картинка внутри
-                             converted++;
-                         }
-                     } catch(e) {
-                         console.error("Failed to embed image for", p.shortTitle);
-                     }
+                         if (base64) { p.imageBase64 = base64; p.imagePath = null; converted++; }
+                     } catch(e) { console.error("Failed to embed image for", p.shortTitle); }
                  }
              }
-
              const dateStr = new Date().toISOString().slice(0, 10);
              const safeUsername = username.replace(/[^a-zA-Z0-9_-]/g, '_');
              const fileName = `suggestion_${safeUsername}_${dateStr}.json`;
-             
-             // 3. Отправляем один "жирный" файл JSON
              await saveToYandexDisk(exportPrompts, fileName);
              await notifyAdminNewPrompts(username, fileName, userPrompts.length);
              showToast(`Отправлено! (Вшито ${converted} фото)`, "success");
-
-         } catch (e) {
-             console.error(e);
-             showToast("Ошибка отправки", "error");
-         } finally {
-             setLoading(false);
-         }
+         } catch (e) { console.error(e); showToast("Ошибка отправки", "error"); } finally { setLoading(false); }
      }
   };
 
@@ -396,32 +408,17 @@ function App() {
       let imagePath = null;
       let base64Preview = null;
       if (rawImageFile) {
-         try {
-             imagePath = await uploadImageToYandex(rawImageFile);
-             base64Preview = null; 
-         } catch(e) { console.error(e); showToast("Фото не загрузилось", "error"); }
+         try { imagePath = await uploadImageToYandex(rawImageFile); base64Preview = null; } 
+         catch(e) { console.error(e); showToast("Фото не загрузилось", "error"); }
       } else { base64Preview = uploadedImage; }
 
       const newEntry: PromptData = {
-        id: generateId(), 
-        originalPrompt: inputPrompt, 
-        model: selectedModel, 
-        category: inputCategory || "Другое", 
-        shortTitle: inputTitle || "Без названия",
+        id: generateId(), originalPrompt: inputPrompt, model: selectedModel, category: inputCategory || "Другое", shortTitle: inputTitle || "Без названия",
         variants: { maleEn: inputPrompt, maleRu: inputPrompt, femaleEn: inputPrompt, femaleRu: inputPrompt, unisexEn: inputPrompt, unisexRu: inputPrompt, male: inputPrompt, female: inputPrompt, unisex: inputPrompt },
-        imageBase64: base64Preview,
-        imagePath: imagePath,
-        note: inputNote.trim(), 
-        usageCount: 0, 
-        createdAt: Date.now(), 
-        generationHistory: [], 
-        isSystem: false,
-        createdBy: username // Метка автора
+        imageBase64: base64Preview, imagePath: imagePath, note: inputNote.trim(), usageCount: 0, createdAt: Date.now(), generationHistory: [], isSystem: false, createdBy: username
       };
       setPrompts(prev => [newEntry, ...prev]);
-      showToast("Сохранено локально!"); 
-      clearCreateForm(); 
-      setView('list');
+      showToast("Сохранено локально!"); clearCreateForm(); setView('list');
     } catch (error) { showToast("Ошибка", "error"); } finally { setLoading(false); }
   };
 
@@ -434,32 +431,16 @@ function App() {
       let imagePath = null;
       let base64Preview = null;
       if (rawImageFile) {
-         try {
-             imagePath = await uploadImageToYandex(rawImageFile);
-             base64Preview = null;
-         } catch(e) { showToast("Ошибка загрузки фото", "error"); }
+         try { imagePath = await uploadImageToYandex(rawImageFile); base64Preview = null; } 
+         catch(e) { showToast("Ошибка загрузки фото", "error"); }
       } else { base64Preview = uploadedImage; }
 
       const newEntry: PromptData = {
-        id: generateId(), 
-        originalPrompt: inputPrompt, 
-        model: selectedModel, 
-        category: inputCategory || analysis.category, 
-        shortTitle: inputTitle || analysis.shortTitle,
-        variants: analysis.variants, 
-        imageBase64: base64Preview,
-        imagePath: imagePath,
-        note: inputNote.trim(), 
-        usageCount: 0, 
-        createdAt: Date.now(), 
-        generationHistory: [], 
-        isSystem: false,
-        createdBy: username // Метка автора
+        id: generateId(), originalPrompt: inputPrompt, model: selectedModel, category: inputCategory || analysis.category, shortTitle: inputTitle || analysis.shortTitle,
+        variants: analysis.variants, imageBase64: base64Preview, imagePath: imagePath, note: inputNote.trim(), usageCount: 0, createdAt: Date.now(), generationHistory: [], isSystem: false, createdBy: username
       };
       setPrompts(prev => [newEntry, ...prev]);
-      showToast("Обработано и сохранено!"); 
-      clearCreateForm(); 
-      setView('list');
+      showToast("Обработано и сохранено!"); clearCreateForm(); setView('list');
     } catch (error) { showToast("Ошибка AI", "error"); } finally { setLoading(false); }
   };
 
@@ -478,16 +459,20 @@ function App() {
   
   const resetFilters = () => { setSearchQuery(''); setSelectedCategoryFilter('all'); setSelectedAuthorFilter('all'); setSortOrder('newest'); };
 
-  // --- ФИЛЬТРАЦИЯ ---
+  // --- ФИЛЬТРАЦИЯ (ОБНОВЛЕННАЯ С ИЗБРАННЫМ) ---
   const allFilteredPrompts = prompts.filter(p => {
     const s = searchQuery.toLowerCase();
-    const matches = p.shortTitle.toLowerCase().includes(s) || p.originalPrompt.toLowerCase().includes(s);
-    const cat = selectedCategoryFilter === 'all' || p.category === selectedCategoryFilter;
+    const matchesSearch = p.shortTitle.toLowerCase().includes(s) || p.originalPrompt.toLowerCase().includes(s);
     
-    // Фильтрация по автору (только если Админ что-то выбрал)
+    // Если выбрано "Избранное"
+    if (selectedCategoryFilter === 'favorites') {
+        return matchesSearch && favorites.includes(p.id);
+    }
+
+    const matchesCategory = selectedCategoryFilter === 'all' || p.category === selectedCategoryFilter;
     const authorMatch = !isAdmin || selectedAuthorFilter === 'all' || (p.createdBy || 'Неизвестно') === selectedAuthorFilter;
 
-    return matches && cat && authorMatch;
+    return matchesSearch && matchesCategory && authorMatch;
   }).sort((a, b) => {
     if (sortOrder === 'with_notes') return (a.note ? -1 : 1);
     if (sortOrder === 'with_photo') return (a.imageBase64 || a.imagePath ? -1 : 1);
@@ -503,11 +488,11 @@ function App() {
   }, {} as Record<string, number>);
 
   const allCategories = Array.from(new Set(prompts.map(p => p.category || 'Без категории'))).sort();
-  
-  // Список авторов для фильтра
   const allAuthors = Array.from(new Set(prompts.map(p => p.createdBy || 'Неизвестно'))).sort();
 
   const visiblePrompts = allFilteredPrompts.slice(0, visibleCount);
+  
+  // Группировка (только если не Избранное)
   const groupedPrompts = visiblePrompts.reduce((acc, p) => { 
       const c = p.category || 'Без категории'; 
       if (!acc[c]) acc[c] = []; 
@@ -519,19 +504,10 @@ function App() {
   const handleShowMore = () => { setVisibleCount(prev => prev + ITEMS_PER_PAGE); };
 
   if (hasAccess === null) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
-  
-  if (hasAccess === false) return (
-    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-center p-6">
-      <div className="bg-red-500/10 p-6 rounded-2xl border border-red-500/20 max-w-sm">
-        <Lock size={48} className="mx-auto text-red-500 mb-4" />
-        <h2 className="text-2xl font-bold text-white mb-2">Доступ закрыт</h2>
-        <a href={CHANNEL_LINK} className="block w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold mt-4">Подписаться</a>
-      </div>
-    </div>
-  );
-
+  if (hasAccess === false) return (<div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-center p-6"><div className="bg-red-500/10 p-6 rounded-2xl border border-red-500/20 max-w-sm"><Lock size={48} className="mx-auto text-red-500 mb-4" /><h2 className="text-2xl font-bold text-white mb-2">Доступ закрыт</h2><a href={CHANNEL_LINK} className="block w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold mt-4">Подписаться</a></div></div>);
   if (!isDataLoaded) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
 
+  // --- ЭКРАН СОЗДАНИЯ (Код без изменений) ---
   if (view === 'create') {
     return (
       <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto w-full h-full">
@@ -542,7 +518,6 @@ function App() {
              <div className="w-8"></div>
           </div>
           <div className="space-y-6 pb-20">
-             {/* ФОРМА СОЗДАНИЯ БЕЗ ИЗМЕНЕНИЙ */}
              <div>
               <label className="block text-sm font-medium text-slate-400 mb-2">Модель</label>
               <div className="grid grid-cols-3 gap-2">
@@ -601,6 +576,7 @@ function App() {
     );
   }
 
+  // --- ОСНОВНОЙ ЭКРАН ---
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans pb-24 overflow-x-hidden">
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
@@ -625,10 +601,10 @@ function App() {
             </div>
             
             <div className="flex items-center gap-2 mt-1">
-                <button onClick={handleApplyInternalExamples} className="p-2 text-slate-400 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors" title="Сбросить к стандартным примерам"><Database size={18} /></button>
-                <button onClick={async () => { if(!confirm("Загрузить базу?")) return; const data = await loadFromYandexDisk(); if(data) { const protectedData = data.map((p: any) => ({ ...p, isSystem: true })); setPrompts(protectedData); showToast("Обновлено!"); } }} className="p-2 text-white bg-blue-500 hover:bg-blue-400 rounded-lg shadow-md transition-colors" title="Загрузить базу из Яндекс.Диска"><CloudDownload size={18} /></button>
-                <button onClick={handleUserSaveToCloud} className={`p-2 text-white rounded-lg shadow-md flex items-center gap-1 transition-colors ${isAdmin ? 'bg-red-600 hover:bg-red-500' : 'bg-yellow-500 hover:bg-yellow-400 text-slate-900'}`} title={isAdmin ? "Перезаписать ОСНОВНУЮ базу в облаке" : "Отправить новые промпты админу"}><Cloud size={18} /></button>
-                {isAdmin && (<><label className="p-2 text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg cursor-pointer shadow-md transition-colors" title="Импортировать базу из файла (.json)"><HardDriveUpload size={18} /><input type="file" accept=".json" onChange={handleImport} className="hidden" /></label><button onClick={handleBackupDatabase} disabled={loading} className="p-2 text-white bg-blue-700 hover:bg-blue-600 rounded-lg shadow-md transition-colors" title="Скачать полную базу с картинками (.json)">{loading ? <Loader2 size={18} className="animate-spin" /> : <HardDriveDownload size={18} />}</button></>)}
+                <button onClick={handleApplyInternalExamples} className="p-2 text-slate-400 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors" title="Сбросить"><Database size={18} /></button>
+                <button onClick={async () => { if(!confirm("Загрузить базу?")) return; const data = await loadFromYandexDisk(); if(data) { const protectedData = data.map((p: any) => ({ ...p, isSystem: true })); setPrompts(protectedData); showToast("Обновлено!"); } }} className="p-2 text-white bg-blue-500 hover:bg-blue-400 rounded-lg shadow-md transition-colors" title="Загрузить"><CloudDownload size={18} /></button>
+                <button onClick={handleUserSaveToCloud} className={`p-2 text-white rounded-lg shadow-md flex items-center gap-1 transition-colors ${isAdmin ? 'bg-red-600 hover:bg-red-500' : 'bg-yellow-500 hover:bg-yellow-400 text-slate-900'}`} title={isAdmin ? "Перезаписать ОСНОВНУЮ базу" : "Предложить новые"}><Cloud size={18} /></button>
+                {isAdmin && (<><label className="p-2 text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg cursor-pointer shadow-md transition-colors"><HardDriveUpload size={18} /><input type="file" accept=".json" onChange={handleImport} className="hidden" /></label><button onClick={handleBackupDatabase} disabled={loading} className="p-2 text-white bg-blue-700 hover:bg-blue-600 rounded-lg shadow-md transition-colors">{loading ? <Loader2 size={18} className="animate-spin" /> : <HardDriveDownload size={18} />}</button></>)}
             </div>
           </div>
           
@@ -642,12 +618,12 @@ function App() {
              <div className="flex gap-2 w-full overflow-x-auto no-scrollbar">
                <select value={selectedCategoryFilter} onChange={(e) => setSelectedCategoryFilter(e.target.value)} className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-300 flex-grow min-w-[140px]">
                  <option value="all">Все категории ({prompts.length})</option>
+                 <option value="favorites">❤️ Избранное ({favorites.length})</option>
                  {allCategories.map(c => (
                     <option key={c} value={c}>{c} ({categoryCounts[c] || 0})</option>
                  ))}
                </select>
 
-               {/* ФИЛЬТР ПО АВТОРУ ДЛЯ АДМИНА */}
                {isAdmin && (
                    <select value={selectedAuthorFilter} onChange={(e) => setSelectedAuthorFilter(e.target.value)} className="bg-slate-950 border border-yellow-500/30 text-yellow-500 rounded-lg px-2 py-2 text-sm flex-grow min-w-[140px]">
                      <option value="all">Все авторы</option>
@@ -674,28 +650,57 @@ function App() {
 
       <main className="max-w-5xl mx-auto px-4 py-6">
         <div className="space-y-8">
-          {sortedGroupKeys.map(cat => (
-            <div key={cat}>
-              <h2 className="text-lg font-bold text-white mb-3 border-l-4 border-indigo-500 pl-2">{cat}</h2>
-              <div className="grid gap-4">
-                {groupedPrompts[cat].map((p: any) => (
-                  <PromptCard 
-                    key={p.id} 
-                    data={p} 
-                    index={allFilteredPrompts.indexOf(p)} 
-                    onDelete={handleDelete} 
-                    onEdit={setEditingPrompt} 
-                    onCategoryUpdate={handleCategoryUpdate} 
-                    onUsageUpdate={handleUsageUpdate} 
-                    onAddHistory={handleAddHistory}
-                    isAdmin={isAdmin} 
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
           
-          {allFilteredPrompts.length === 0 && <div className="text-center text-slate-500 py-10">Ничего не найдено</div>}
+          {/* ЕСЛИ ИЗБРАННОЕ - ПРОСТО СПИСОК */}
+          {selectedCategoryFilter === 'favorites' ? (
+              <div className="grid gap-4">
+                  {allFilteredPrompts.length > 0 ? allFilteredPrompts.map((p, idx) => (
+                      <PromptCard 
+                        key={p.id} 
+                        data={p} 
+                        index={idx} 
+                        onDelete={handleDelete} 
+                        onEdit={setEditingPrompt} 
+                        onCategoryUpdate={handleCategoryUpdate} 
+                        onUsageUpdate={handleUsageUpdate} 
+                        onAddHistory={handleAddHistory}
+                        isAdmin={isAdmin}
+                        // ПЕРЕДАЕМ ДАННЫЕ В КАРТОЧКУ
+                        isFavorite={true}
+                        onToggleFavorite={toggleFavorite}
+                      />
+                  )) : (
+                      <div className="text-center text-slate-500 py-10">В избранном пока пусто</div>
+                  )}
+              </div>
+          ) : (
+              // ОБЫЧНЫЙ РЕЖИМ (ПО КАТЕГОРИЯМ)
+              sortedGroupKeys.map(cat => (
+                <div key={cat}>
+                  <h2 className="text-lg font-bold text-white mb-3 border-l-4 border-indigo-500 pl-2">{cat}</h2>
+                  <div className="grid gap-4">
+                    {groupedPrompts[cat].map((p: any) => (
+                      <PromptCard 
+                        key={p.id} 
+                        data={p} 
+                        index={allFilteredPrompts.indexOf(p)} 
+                        onDelete={handleDelete} 
+                        onEdit={setEditingPrompt} 
+                        onCategoryUpdate={handleCategoryUpdate} 
+                        onUsageUpdate={handleUsageUpdate} 
+                        onAddHistory={handleAddHistory}
+                        isAdmin={isAdmin} 
+                        // ПЕРЕДАЕМ ДАННЫЕ В КАРТОЧКУ
+                        isFavorite={favorites.includes(p.id)}
+                        onToggleFavorite={toggleFavorite}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))
+          )}
+          
+          {allFilteredPrompts.length === 0 && selectedCategoryFilter !== 'favorites' && <div className="text-center text-slate-500 py-10">Ничего не найдено</div>}
 
           {visibleCount < allFilteredPrompts.length && (
             <div className="flex flex-col items-center mt-8 mb-12 gap-2">
