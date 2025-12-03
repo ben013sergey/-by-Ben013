@@ -20,9 +20,7 @@ import {
     uploadImageToYandex, 
     deleteImageFromYandex,
     notifyAdminNewPrompts,
-    getProxyImageUrl,
-    loadFavoritesFile,
-    saveFavoritesFile
+    getProxyImageUrl
 } from './services/yandexDiskService';
 // ИМПОРТ НОВОГО СЕРВИСА (CloudStorage)
 import { tgStorage } from './services/telegramStorage';
@@ -124,66 +122,43 @@ function App() {
   // --- ИЗБРАННОЕ (НОВАЯ ФИЧА) ---
   const [favorites, setFavorites] = useState<string[]>([]);
 
-  const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
-  const userId = tgUser?.id;
-  const username = tgUser?.username ? `@${tgUser.username}` : (tgUser?.first_name || "Guest");
-  
-  const urlParams = new URLSearchParams(window.location.search);
-  const urlPass = urlParams.get('uid');
-
-  const isAdmin = (userId === ADMIN_ID) || (urlPass === 'ben013');
-
-  // Загружаем избранное из Telegram CloudStorage или Yandex Disk при старте
+  // Загружаем избранное из Telegram CloudStorage при старте
   useEffect(() => {
     const loadFavorites = async () => {
       try {
-        if (isAdmin) {
-            // АДМИН: Грузим с Яндекс.Диска
-            const cloudFavs = await loadFavoritesFile();
-            if (cloudFavs) setFavorites(cloudFavs);
-        } else {
-            // ПОЛЬЗОВАТЕЛЬ: Грузим из Телеграма
-            const data = await tgStorage.getItem('pv_favorites');
-            if (data) {
-                const parsed = JSON.parse(data);
-                if (Array.isArray(parsed)) setFavorites(parsed);
-            }
+        const data = await tgStorage.getItem('pv_favorites');
+        if (data) {
+          const parsed = JSON.parse(data);
+          if (Array.isArray(parsed)) {
+            setFavorites(parsed);
+          }
         }
       } catch (e) {
-        console.error("Fav load error", e);
+        console.error("Ошибка загрузки избранного:", e);
       }
     };
-    // Загружаем только когда поняли, админ это или нет
-    if (hasAccess !== null) { 
-        loadFavorites(); 
-    }
-  }, [isAdmin, hasAccess]);
+    loadFavorites();
+  }, []);
 
   const toggleFavorite = async (id: string) => {
-      // Оптимистичное обновление UI
-      const newFavs = favorites.includes(id) 
-          ? favorites.filter(favId => favId !== id) 
-          : [...favorites, id];
-      
-      setFavorites(newFavs);
+    // Оптимистичное обновление UI
+    const newFavs = favorites.includes(id) 
+        ? favorites.filter(favId => favId !== id) 
+        : [...favorites, id];
+    
+    setFavorites(newFavs);
 
-      // Вибрация (для приятного отклика)
-      if (window.Telegram?.WebApp?.HapticFeedback) {
-          window.Telegram.WebApp.HapticFeedback.selectionChanged();
-      }
+    // Вибрация (для приятного отклика)
+    if (window.Telegram?.WebApp?.HapticFeedback) {
+        window.Telegram.WebApp.HapticFeedback.selectionChanged();
+    }
 
-      // Разделение логики сохранения
-      if (isAdmin) {
-          // АДМИН -> Яндекс.Диск
-          await saveFavoritesFile(newFavs); 
-      } else {
-          // ПОЛЬЗОВАТЕЛЬ -> Телеграм Cloud
-          try {
-              await tgStorage.setItem('pv_favorites', JSON.stringify(newFavs));
-          } catch (e) {
-              console.error("Ошибка сохранения в облако:", e);
-          }
-      }
+    // Сохранение в облако
+    try {
+        await tgStorage.setItem('pv_favorites', JSON.stringify(newFavs));
+    } catch (e) {
+        console.error("Ошибка сохранения в облако:", e);
+    }
   };
   // --------------------------------
 
@@ -209,6 +184,15 @@ function App() {
   
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
+
+  const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+  const userId = tgUser?.id;
+  const username = tgUser?.username ? `@${tgUser.username}` : (tgUser?.first_name || "Guest");
+  
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlPass = urlParams.get('uid');
+
+  const isAdmin = (userId === ADMIN_ID) || (urlPass === 'ben013');
 
   useEffect(() => {
     const checkSubscription = async () => {
@@ -682,7 +666,7 @@ function App() {
                         onAddHistory={handleAddHistory}
                         isAdmin={isAdmin}
                         // ПЕРЕДАЕМ ДАННЫЕ В КАРТОЧКУ
-                        isFavorite={favorites.includes(p.id)}
+                        isFavorite={true}
                         onToggleFavorite={toggleFavorite}
                       />
                   )) : (
