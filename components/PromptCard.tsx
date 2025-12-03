@@ -10,7 +10,6 @@ enum GenderVariant {
   Unisex = 'Unisex'
 }
 
-// google - это теперь спец-режим для админа
 type ModelProvider = 'pollinations' | 'huggingface' | 'google';
 
 interface PromptCardProps {
@@ -43,7 +42,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const [isGenerating, setIsGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
-  const [adminCopiedInfo, setAdminCopiedInfo] = useState(false); // Для уведомления админа
+  const [adminCopiedInfo, setAdminCopiedInfo] = useState<string | null>(null);
 
   // Zoom & Parallax State
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -93,20 +92,31 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
         const promptToUse = getGenerationText();
         let textToCopy = `Create a photorealistic image: ${promptToUse}. Aspect ratio ${aspectRatio}.`;
         
-        // Если есть картинка, админу придется её вставить самому, но мы подскажем
+        let notifyMsg = "✅ Промпт скопирован! Вставьте в чат (Ctrl+V).";
+
+        // Если была картинка, добавляем подсказку в текст (для себя) и в уведомление
         if (testReferenceImage) {
             textToCopy += " (Use uploaded image as reference)";
+            notifyMsg = "⚠️ Промпт скопирован! Картинку загрузите вручную.";
         }
 
         // Копируем в буфер
         navigator.clipboard.writeText(textToCopy);
         
-        // Открываем Gemini
-        window.open('https://gemini.google.com/app', '_blank');
+        // Открываем Gemini (Универсальный метод: и для WEB, и для TG)
+        const googleUrl = 'https://gemini.google.com/app';
         
-        // Показываем уведомление внутри карточки
-        setAdminCopiedInfo(true);
-        setTimeout(() => setAdminCopiedInfo(false), 5000);
+        // @ts-ignore - проверяем наличие Telegram API
+        if (window.Telegram?.WebApp?.openLink) {
+            // @ts-ignore
+            window.Telegram.WebApp.openLink(googleUrl);
+        } else {
+            window.open(googleUrl, '_blank');
+        }
+        
+        // Показываем уведомление
+        setAdminCopiedInfo(notifyMsg);
+        setTimeout(() => setAdminCopiedInfo(null), 6000);
         return;
     }
 
@@ -119,8 +129,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
       const promptToUse = getGenerationText();
       if (!promptToUse) throw new Error("Промпт пустой");
 
-      // Важно: в сервис мы передаем только pollinations или huggingface
-      // google здесь уже не используется как API
       const result = await generateNanoBananaImage(promptToUse, testReferenceImage, aspectRatio, genModel as 'pollinations' | 'huggingface');
       
       setGeneratedImage(result.url);
@@ -140,7 +148,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     }
   };
   
-  // Handlers
   const handleRefUpload = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => setTestReferenceImage(reader.result as string); reader.readAsDataURL(file); }};
   const handleMainImageDownload = (e: React.MouseEvent) => { e.stopPropagation(); if (finalImageSrc) { const link = document.createElement('a'); link.href = finalImageSrc; link.download = `${data.shortTitle}_ref.png`; document.body.appendChild(link); link.click(); document.body.removeChild(link); }};
   const handleCardMouseMove = (e: React.MouseEvent<HTMLDivElement>) => { if (!cardRef.current) return; const rect = cardRef.current.getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top; const centerX = rect.width / 2; const centerY = rect.height / 2; setRotateX(((y - centerY) / centerY) * -3); setRotateY(((x - centerX) / centerX) * 3); };
@@ -177,33 +184,42 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
           </div>
 
           <div className="flex-grow flex flex-col min-w-0">
-            {/* Текст и остальное без изменений... */}
             <div className="flex justify-between items-start mb-3">
-                {/* ... (код шапки карточки) ... */}
-                <div className="flex flex-col relative flex-grow mr-4 min-w-0">
-                    <div className="group relative inline-flex items-center gap-1 mb-1 cursor-pointer" onClick={() => canEdit && setShowCategoryDropdown(!showCategoryDropdown)}>
-                        <span className="text-xs text-indigo-400 font-medium uppercase tracking-wider hover:text-indigo-300 transition-colors truncate">{data.category}</span>
-                        {canEdit && <Edit2 size={10} className="text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />}
-                        {showCategoryDropdown && canEdit && (
-                            <div className="absolute top-full left-0 mt-1 z-20 bg-slate-800 border border-slate-600 rounded-lg shadow-xl w-64 py-1 animate-in fade-in slide-in-from-top-2 duration-150">
-                            {VALID_CATEGORIES.map(cat => (<div key={cat} className={`px-3 py-2 text-xs hover:bg-indigo-600 hover:text-white cursor-pointer transition-colors ${data.category === cat ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300'}`} onClick={(e) => { e.stopPropagation(); onCategoryUpdate(data.id, cat); setShowCategoryDropdown(false); }}>{cat}</div>))}
-                            </div>
-                        )}
+              <div className="flex flex-col relative flex-grow mr-4 min-w-0">
+                <div className="group relative inline-flex items-center gap-1 mb-1 cursor-pointer" onClick={() => canEdit && setShowCategoryDropdown(!showCategoryDropdown)}>
+                  <span className="text-xs text-indigo-400 font-medium uppercase tracking-wider hover:text-indigo-300 transition-colors truncate">{data.category}</span>
+                  {canEdit && <Edit2 size={10} className="text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />}
+                  {showCategoryDropdown && canEdit && (
+                    <div className="absolute top-full left-0 mt-1 z-20 bg-slate-800 border border-slate-600 rounded-lg shadow-xl w-64 py-1 animate-in fade-in slide-in-from-top-2 duration-150">
+                       {VALID_CATEGORIES.map(cat => (<div key={cat} className={`px-3 py-2 text-xs hover:bg-indigo-600 hover:text-white cursor-pointer transition-colors ${data.category === cat ? 'bg-indigo-500/10 text-indigo-300' : 'text-slate-300'}`} onClick={(e) => { e.stopPropagation(); onCategoryUpdate(data.id, cat); setShowCategoryDropdown(false); }}>{cat}</div>))}
                     </div>
-                    <div className="flex items-center gap-2"><h3 className="text-lg font-semibold text-white truncate" title={data.shortTitle}>{data.shortTitle}</h3>{data.isSystem && !isAdmin && <Lock size={14} className="text-slate-500" title="Системный промпт" />}</div>
+                  )}
                 </div>
-                <div className="flex items-center gap-1 flex-shrink-0">{canEdit ? (<><button onClick={(e) => { e.stopPropagation(); onEdit(data); }} className="text-slate-500 hover:text-white hover:bg-slate-700 rounded p-1.5"><Pencil size={18} /></button><button onClick={(e) => { e.stopPropagation(); onDelete(data.id); }} className="text-slate-500 hover:text-red-400 hover:bg-slate-700/50 rounded p-1.5"><Trash2 size={18} /></button></>) : (<span className="text-[10px] text-slate-600 px-2 py-1 border border-slate-700 rounded select-none">ReadOnly</span>)}</div>
+                <div className="flex items-center gap-2">
+                   <h3 className="text-lg font-semibold text-white truncate" title={data.shortTitle}>{data.shortTitle}</h3>
+                   {data.isSystem && !isAdmin && <Lock size={14} className="text-slate-500" title="Системный промпт" />}
+                </div>
+              </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                {canEdit ? (
+                  <><button onClick={(e) => { e.stopPropagation(); onEdit(data); }} className="text-slate-500 hover:text-white hover:bg-slate-700 rounded p-1.5"><Pencil size={18} /></button><button onClick={(e) => { e.stopPropagation(); onDelete(data.id); }} className="text-slate-500 hover:text-red-400 hover:bg-slate-700/50 rounded p-1.5"><Trash2 size={18} /></button></>
+                ) : (<span className="text-[10px] text-slate-600 px-2 py-1 border border-slate-700 rounded select-none">ReadOnly</span>)}
+              </div>
             </div>
 
             {data.note && <div className="mb-3 px-3 py-2 bg-yellow-500/5 border border-yellow-500/20 rounded-lg text-xs text-yellow-200/80 flex items-start gap-2"><StickyNote size={14} className="mt-0.5 text-yellow-500/50 flex-shrink-0" /><span className="whitespace-pre-wrap leading-relaxed break-words">{data.note}</span></div>}
 
-            <div className="flex flex-wrap gap-2 mb-3">{[GenderVariant.Female, GenderVariant.Male, GenderVariant.Unisex].map((variant) => (<button key={variant} onClick={() => setActiveVariant(variant)} className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${activeVariant === variant ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>{variant === GenderVariant.Female ? 'Девушка' : variant === GenderVariant.Male ? 'Парень' : 'Унисекс'}</button>))}</div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {[GenderVariant.Female, GenderVariant.Male, GenderVariant.Unisex].map((variant) => (
+                <button key={variant} onClick={() => setActiveVariant(variant)} className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${activeVariant === variant ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>{variant === GenderVariant.Female ? 'Девушка' : variant === GenderVariant.Male ? 'Парень' : 'Унисекс'}</button>
+              ))}
+            </div>
 
             <div className="bg-slate-900/50 rounded-lg border border-slate-700/50 flex-grow grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-slate-700/50">
               <div className="p-3 lg:col-span-2 flex flex-col relative group">
                 <p className="text-sm text-slate-300 font-mono leading-relaxed break-words whitespace-pre-wrap flex-grow h-full max-h-[300px] overflow-y-auto">{getCurrentText()}</p>
                 <div className="flex justify-end gap-2 mt-2">
-                  <button onClick={() => setShowRussian(!showRussian)} className={`p-2 rounded-md transition-all text-xs flex items-center gap-1 ${showRussian ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-blue-400'}`}><Languages size={14} /><span>{showRussian ? 'RU' : 'EN'}</span></button>
+                  <button onClick={() => setShowRussian(!showRussian)} className={`p-2 rounded-md transition-all text-xs flex items-center gap-1 ${showRussian ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-blue-400'}`} title={showRussian ? "Показать оригинал (EN)" : "Показать перевод (RU)"}><Languages size={14} /><span>{showRussian ? 'RU' : 'EN'}</span></button>
                   <button onClick={handleCopy} className="p-2 rounded-md bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-all border border-slate-600 flex items-center gap-2 text-xs">{copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}<span>{copied ? 'Copied' : 'Copy'}</span></button>
                 </div>
               </div>
@@ -215,7 +231,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                    ) : (<label className="w-full h-full border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-colors"><Upload size={16} className="text-slate-500 mb-1" /><span className="text-[10px] text-slate-400">Фото (опц)</span><input type="file" accept="image/*" className="hidden" onChange={handleRefUpload} /></label>)}
                  </div>
                  
-                 {/* КНОПКА ГЕНЕРАЦИИ */}
                  <button onClick={handleTestGeneration} disabled={isGenerating} className={`w-full h-10 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${isGenerating ? 'bg-slate-700 text-slate-400' : genModel === 'google' ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg'}`}>
                     {genModel === 'google' ? <ExternalLink size={16} /> : isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} fill="currentColor" />} 
                     {genModel === 'google' ? 'Открыть Gemini' : isGenerating ? 'Wait...' : 'Генерировать'}
@@ -227,21 +242,16 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                       <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"><Scaling size={12} /></div>
                     </div>
                     <div className="relative flex-1">
-                      <select 
-                          value={genModel} 
-                          onChange={(e) => setGenModel(e.target.value as ModelProvider)} 
-                          className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-[10px] text-slate-300 outline-none appearance-none"
-                      >
+                      <select value={genModel} onChange={(e) => setGenModel(e.target.value as ModelProvider)} className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-[10px] text-slate-300 outline-none appearance-none">
                         <option value="pollinations">Fast (Free)</option>
                         <option value="huggingface">HQ (Flux)</option>
-                        {/* ПОКАЗЫВАЕМ ТОЛЬКО АДМИНУ */}
                         {isAdmin && <option value="google">Nano Banana (Pro)</option>}
                       </select>
                       <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"><Aperture size={12} /></div>
                     </div>
                  </div>
 
-                 {adminCopiedInfo && <div className="mt-2 text-[10px] text-amber-300 bg-amber-500/10 p-2 rounded border border-amber-500/20 animate-in fade-in slide-in-from-top-2">✅ Промпт скопирован! Вставьте (Ctrl+V) в открывшемся окне.</div>}
+                 {adminCopiedInfo && <div className="mt-2 text-[10px] text-amber-300 bg-amber-500/10 p-2 rounded border border-amber-500/20 animate-in fade-in slide-in-from-top-2">{adminCopiedInfo}</div>}
 
                  {generatedImage && !isGenerating && (<div className="mt-2 animate-in fade-in zoom-in duration-300"><div className="relative w-full h-40 rounded-lg overflow-hidden border border-emerald-500/50 shadow-lg cursor-pointer" onClick={() => setActiveModalImage(generatedImage)}><img src={generatedImage} className="w-full h-full object-cover" alt="Generated" /></div></div>)}
                  {genError && <div className="mt-2 text-xs text-red-400 bg-red-500/10 p-2 rounded border border-red-500/20">{genError}</div>}
