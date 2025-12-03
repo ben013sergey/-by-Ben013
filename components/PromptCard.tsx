@@ -21,7 +21,6 @@ interface PromptCardProps {
   onUsageUpdate: (id: string) => void;
   onAddHistory: (id: string, image: GeneratedImage) => void;
   isAdmin: boolean;
-  // Новые пропсы для Избранного
   isFavorite: boolean;
   onToggleFavorite: (id: string) => void;
 }
@@ -47,7 +46,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const [showHistory, setShowHistory] = useState(false);
   const [adminCopiedInfo, setAdminCopiedInfo] = useState<string | null>(null);
 
-  // Zoom & Parallax State
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panPosition, setPanPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -59,7 +57,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
 
   const canEdit = isAdmin || !data.isSystem;
 
-  // --- HAPTIC FEEDBACK (Усиленный) ---
   const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft' = 'medium') => {
     // @ts-ignore
     if (window.Telegram?.WebApp?.HapticFeedback) {
@@ -76,39 +73,26 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     }
   };
 
-  // --- ГИРОСКОП (Сглаженный) ---
   useEffect(() => {
     const handleOrientation = (e: DeviceOrientationEvent) => {
         if (isHovered) return;
-
-        // Максимальный наклон в градусах (уменьшили с 15 до 5 для тонкого эффекта)
         const MAX_TILT = 5; 
-        
         let x = e.beta || 0; 
         let y = e.gamma || 0;
-
-        // Корректировка под "держание в руке" (~45 градусов)
         x = x - 45; 
-
-        // Сглаживание: умножаем на 0.1, чтобы движение было плавным и мелким
         x = x * 0.1;
         y = y * 0.1;
-
         if (x > MAX_TILT) x = MAX_TILT;
         if (x < -MAX_TILT) x = -MAX_TILT;
         if (y > MAX_TILT) y = MAX_TILT;
         if (y < -MAX_TILT) y = -MAX_TILT;
-
         setRotateX(-x); 
         setRotateY(y);
     };
-
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
     if (isMobile && window.DeviceOrientationEvent) {
         window.addEventListener('deviceorientation', handleOrientation);
     }
-
     return () => {
         if (isMobile) {
             window.removeEventListener('deviceorientation', handleOrientation);
@@ -136,7 +120,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   }, [activeModalImage]);
 
   const handleCopy = () => {
-    triggerHaptic('medium'); // Усиленная вибрация для копирования
+    triggerHaptic('medium'); 
     navigator.clipboard.writeText(getCurrentText() || "");
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -149,13 +133,10 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const handleDownload = async (imageUrl: string | null, fileName: string) => {
     if (!imageUrl) return;
     triggerHaptic('medium');
-
     try {
         const response = await fetch(imageUrl);
         const blob = await response.blob();
-        
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
         if (isMobile) {
             const file = new File([blob], `${fileName}.png`, { type: 'image/png' });
             if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -170,19 +151,16 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                 }
             }
         }
-
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
         link.download = `${fileName}.png`;
         document.body.appendChild(link);
         link.click();
-        
         setTimeout(() => {
             document.body.removeChild(link);
             window.URL.revokeObjectURL(url);
         }, 100);
-
     } catch (e) {
         console.error("Download failed:", e);
         window.open(imageUrl, '_blank');
@@ -201,38 +179,30 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
 
   const handleTestGeneration = async () => {
     triggerHaptic('medium');
-
     if (genModel === 'google' && isAdmin) {
         const promptToUse = getGenerationText();
         let textToCopy = `Create a photorealistic image: ${promptToUse}. Aspect ratio ${aspectRatio}.`;
         let notifyMsg = "✅ Промпт скопирован! Вставьте в чат.";
-
         if (testReferenceImage) {
             textToCopy += " (Use uploaded image as reference)";
             notifyMsg = "⚠️ Промпт скопирован! (Загрузите фото вручную)";
         }
-
         navigator.clipboard.writeText(textToCopy);
         openExternalLink('https://gemini.google.com/app');
         setAdminCopiedInfo(notifyMsg);
         setTimeout(() => setAdminCopiedInfo(null), 6000);
         return;
     }
-
     setIsGenerating(true);
     setGenError(null);
     setGeneratedImage(null);
-
     try {
       const promptToUse = getGenerationText();
       if (!promptToUse) throw new Error("Промпт пустой");
-
       const result = await generateNanoBananaImage(promptToUse, testReferenceImage, aspectRatio, genModel as 'pollinations' | 'huggingface');
-      
       setGeneratedImage(result.url);
       triggerNotification('success');
       onUsageUpdate(data.id);
-      
       const newHistoryItem: GeneratedImage = {
         id: Date.now().toString(),
         url: result.url,
@@ -264,6 +234,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const handleWheel = (e: React.WheelEvent) => { if (e.ctrlKey || activeModalImage) { if (e.deltaY < 0) setZoomLevel(prev => Math.min(prev + 0.1, 5)); else setZoomLevel(prev => Math.max(prev - 0.1, 0.5)); }};
   const aspectRatioOptions: AspectRatio[] = ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9'];
 
+  // ИЗМЕНЕНИЯ ЗДЕСЬ: Улучшенная верстка футера карточки
   return (
     <>
       <div 
@@ -291,24 +262,29 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
               ) : (<div className="w-full h-full flex flex-col items-center justify-center text-slate-500"><ImageIcon size={32} /><span className="text-xs mt-2">Нет фото</span></div>)}
             </div>
             
-            {/* КНОПКА ИЗБРАННОГО */}
-            <div className="flex justify-between items-center w-full mt-2">
+            {/* КНОПКА ИЗБРАННОГО И ДАТА: Исправленная верстка */}
+            <div className="flex items-center justify-between w-full mt-3 gap-3">
                 <button 
                     onClick={(e) => { e.stopPropagation(); triggerHaptic('medium'); onToggleFavorite(data.id); }}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${isFavorite ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-white'}`}
+                    className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all flex-grow shadow-md border ${isFavorite ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50 hover:bg-indigo-600/30' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white'}`}
                 >
-                    <Heart size={14} className={isFavorite ? "fill-red-400" : ""} />
+                    <Heart size={14} className={isFavorite ? "fill-indigo-400" : ""} />
                     <span>{isFavorite ? 'В избранном' : 'В избранное'}</span>
                 </button>
-                <div className="flex items-center gap-1.5 text-[10px] text-slate-500"><Clock size={10} /><span>{formatDate(data.createdAt)}</span></div>
+                
+                <div className="flex flex-col items-end text-[10px] text-slate-500 flex-shrink-0">
+                    <div className="flex items-center gap-1"><Clock size={10} /><span>{new Date(data.createdAt).toLocaleDateString()}</span></div>
+                    <span>{new Date(data.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                </div>
             </div>
             
-            {isAdmin && data.author && (<div className="flex items-center gap-1 mt-1 px-2 py-1 bg-slate-900/80 rounded border border-indigo-500/30 text-[10px] text-indigo-300 w-full"><User size={10} /><span>by {data.author}</span></div>)}
+            {isAdmin && data.author && (<div className="flex items-center gap-1 mt-2 px-2 py-1 bg-slate-900/80 rounded border border-indigo-500/30 text-[10px] text-indigo-300 w-full"><User size={10} /><span>by {data.author}</span></div>)}
           </div>
 
           <div className="flex-grow flex flex-col min-w-0">
-            {/* ... ТЕКСТОВАЯ ЧАСТЬ КАРТОЧКИ (код тот же) ... */}
-            <div className="flex justify-between items-start mb-3">
+             {/* Остальная часть карточки (текст и генерация) без изменений */}
+             {/* ... */}
+             <div className="flex justify-between items-start mb-3">
               <div className="flex flex-col relative flex-grow mr-4 min-w-0">
                 <div className="group relative inline-flex items-center gap-1 mb-1 cursor-pointer" onClick={() => canEdit && setShowCategoryDropdown(!showCategoryDropdown)}>
                   <span className="text-xs text-indigo-400 font-medium uppercase tracking-wider hover:text-indigo-300 transition-colors truncate">{data.category}</span>
