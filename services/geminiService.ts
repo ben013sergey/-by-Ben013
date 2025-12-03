@@ -69,8 +69,8 @@ export const generateNanoBananaImage = async (
     }
 
     // --- GOOGLE (Gemini 2.0 Flash - Native) ---
+    // Внимание: здесь теперь НЕТ цикла, просто один запрос
     else if (provider === 'google') {
-        // Просто отправляем запрос и ждем ответ (он быстрый, ~5-10 сек)
         const response = await fetch('/api/googleImage', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -82,7 +82,6 @@ export const generateNanoBananaImage = async (
         });
 
         if (!response.ok) {
-            // Пытаемся достать текст ошибки из JSON
             let errorMsg = response.statusText;
             try {
                 const errData = await response.json();
