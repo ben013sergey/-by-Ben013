@@ -86,3 +86,40 @@ export const loadFromYandexDisk = async () => {
     throw error;
   }
 };
+// services/yandexDiskService.ts
+
+// ... (остальные функции без изменений) ...
+
+// НОВАЯ ФУНКЦИЯ: Загрузка произвольного файла (для избранного)
+export const loadFavoritesFile = async (): Promise<string[] | null> => {
+  try {
+    const response = await fetch(`/api/yandex?filename=admin_favorites.json`, {
+      method: 'GET',
+    });
+
+    if (response.status === 404) return []; // Файла еще нет
+    if (!response.ok) throw new Error('Ошибка загрузки избранного');
+
+    const data = await response.json();
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error("Error loading admin favorites:", error);
+    return null;
+  }
+};
+
+// НОВАЯ ФУНКЦИЯ: Сохранение произвольного файла
+export const saveFavoritesFile = async (favs: string[]) => {
+  try {
+    await fetch('/api/yandex', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+          filename: 'admin_favorites.json', // Фиксированное имя для админа
+          data: favs 
+      }),
+    });
+  } catch (error) {
+    console.error("Error saving admin favorites:", error);
+  }
+};
