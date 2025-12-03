@@ -85,40 +85,57 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     return new Date(timestamp).toLocaleString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
-  // --- УНИВЕРСАЛЬНАЯ ФУНКЦИЯ СКАЧИВАНИЯ (Share API для мобильных) ---
+  // --- ИСПРАВЛЕННАЯ ФУНКЦИЯ СКАЧИВАНИЯ ---
   const handleDownload = async (imageUrl: string | null, fileName: string) => {
     if (!imageUrl) return;
 
     try {
-        // 1. Сначала превращаем URL или Base64 в Blob (файл в памяти)
+        // 1. Получаем файл (Blob)
         const response = await fetch(imageUrl);
         const blob = await response.blob();
-        const file = new File([blob], `${fileName}.png`, { type: 'image/png' });
+        
+        // 2. Определяем, мобильное ли это устройство
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
-        // 2. Проверяем, поддерживает ли браузер (Телеграм) нативный шеринг файлов
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-            await navigator.share({
-                files: [file],
-                title: fileName,
-                text: 'Сгенерировано в PromptVault'
-            });
-        } else {
-            // 3. Если нет (например, ПК) - используем классическое скачивание
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = `${fileName}.png`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+        // 3. ЛОГИКА ДЛЯ МОБИЛЬНЫХ (Telegram)
+        if (isMobile) {
+            const file = new File([blob], `${fileName}.png`, { type: 'image/png' });
+            // Пробуем нативное меню "Поделиться"
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                try {
+                    await navigator.share({
+                        files: [file],
+                        title: fileName,
+                    });
+                    return; // Если успешно поделились - выходим
+                } catch (shareError) {
+                    console.log("Share API cancelled or failed, falling back to download");
+                }
+            }
         }
+
+        // 4. ЛОГИКА ДЛЯ ПК (ИЛИ ЕСЛИ SHARE НЕ СРАБОТАЛ)
+        // Классическое принудительное скачивание
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${fileName}.png`;
+        document.body.appendChild(link);
+        link.click();
+        
+        // Чистим за собой
+        setTimeout(() => {
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+        }, 100);
+
     } catch (e) {
         console.error("Download failed:", e);
-        // Фолбэк на простое открытие в новой вкладке, если все сломалось
+        // Аварийный вариант - просто открыть картинку в новой вкладке
         window.open(imageUrl, '_blank');
     }
   };
 
-  // --- УНИВЕРСАЛЬНАЯ ФУНКЦИЯ ОТКРЫТИЯ ССЫЛКИ ---
   const openExternalLink = (url: string) => {
     // @ts-ignore
     if (window.Telegram?.WebApp?.openLink) {
@@ -145,7 +162,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
 
         navigator.clipboard.writeText(textToCopy);
         
-        // Открываем сайт
         openExternalLink('https://gemini.google.com/app');
         
         setAdminCopiedInfo(notifyMsg);
@@ -183,7 +199,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   
   const handleRefUpload = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => setTestReferenceImage(reader.result as string); reader.readAsDataURL(file); }};
   
-  // Клик по превью картинки (скачивание)
   const handleMainImageClick = (e: React.MouseEvent) => { 
       e.stopPropagation(); 
       if (finalImageSrc) {
@@ -198,7 +213,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const handleZoomOut = (e: React.MouseEvent) => { e.stopPropagation(); setZoomLevel(prev => Math.max(prev - 0.5, 0.5)); };
   const handleResetZoom = (e: React.MouseEvent) => { e.stopPropagation(); setZoomLevel(1); setPanPosition({ x: 0, y: 0 }); };
   
-  // Скачивание из модалки
   const handleDownloadFromModal = (e: React.MouseEvent) => { 
       e.stopPropagation(); 
       handleDownload(activeModalImage, `generated_${Date.now()}`);
@@ -223,31 +237,23 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                <div className={`flex items-center justify-center w-8 h-8 rounded-full font-bold text-sm border ${data.isSystem ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50' : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50'}`}>#{index + 1}</div>
                <div className="text-xs text-slate-400 font-mono bg-slate-900 px-2 py-1 rounded">{data.model}</div>
             </div>
-            
-            {/* ГЛАВНАЯ КАРТИНКА */}
             <div className={`w-full aspect-square rounded-lg overflow-hidden bg-slate-900 border border-slate-700 relative group ${finalImageSrc ? 'cursor-pointer' : ''}`} onClick={() => finalImageSrc && setActiveModalImage(finalImageSrc)}>
               {finalImageSrc ? (
                 <>
                     <img src={finalImageSrc} alt={data.shortTitle} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/>
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
-                        {/* Кнопка скачивания на превью */}
-                        <button onClick={handleMainImageClick} className="absolute top-2 left-2 p-1.5 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md z-10">
-                            <Download size={16} />
-                        </button>
-                        <button className="p-2 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md transform scale-90 group-hover:scale-100">
-                            <Maximize2 size={24} />
-                        </button>
+                        <button onClick={handleMainImageClick} className="absolute top-2 left-2 p-1.5 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md z-10"><Download size={16} /></button>
+                        <button className="p-2 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md transform scale-90 group-hover:scale-100"><Maximize2 size={24} /></button>
                     </div>
                 </>
               ) : (<div className="w-full h-full flex flex-col items-center justify-center text-slate-500"><ImageIcon size={32} /><span className="text-xs mt-2">Нет фото</span></div>)}
             </div>
-            
             {isAdmin && data.author && (<div className="flex items-center gap-1 mt-auto px-2 py-1 bg-slate-900/80 rounded border border-indigo-500/30 text-[10px] text-indigo-300"><User size={10} /><span>by {data.author}</span></div>)}
             <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-1"><Clock size={10} /><span>{formatDate(data.createdAt)}</span></div>
           </div>
 
           <div className="flex-grow flex flex-col min-w-0">
-            {/* ШАПКА КАРТОЧКИ */}
+            {/* Текст и управление (без изменений) */}
             <div className="flex justify-between items-start mb-3">
               <div className="flex flex-col relative flex-grow mr-4 min-w-0">
                 <div className="group relative inline-flex items-center gap-1 mb-1 cursor-pointer" onClick={() => canEdit && setShowCategoryDropdown(!showCategoryDropdown)}>
@@ -295,11 +301,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                       <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"><Scaling size={12} /></div>
                     </div>
                     <div className="relative flex-1">
-                      <select 
-                          value={genModel} 
-                          onChange={(e) => setGenModel(e.target.value as ModelProvider)} 
-                          className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-[10px] text-slate-300 outline-none appearance-none"
-                      >
+                      <select value={genModel} onChange={(e) => setGenModel(e.target.value as ModelProvider)} className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-[10px] text-slate-300 outline-none appearance-none">
                         <option value="pollinations">Fast (Free)</option>
                         <option value="huggingface">HQ (Flux)</option>
                         {isAdmin && <option value="google">Nano Banana (Pro)</option>}
@@ -318,7 +320,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
         </div>
       </div>
       
-      {/* МОДАЛЬНОЕ ОКНО ПРОСМОТРА */}
+      {/* МОДАЛЬНОЕ ОКНО */}
       {activeModalImage && (
         <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center overflow-hidden" onWheel={handleWheel}>
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[110] flex items-center gap-2 bg-slate-800/90 border border-slate-700 rounded-full px-4 py-2 shadow-2xl backdrop-blur-md">
@@ -327,7 +329,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                 <button onClick={handleZoomIn} className="p-2 text-slate-300 hover:text-white"><ZoomIn size={20} /></button>
                 <div className="w-px h-6 bg-slate-600 mx-1"></div>
                 <button onClick={handleResetZoom} className="p-2 text-slate-300 hover:text-white"><RotateCcw size={20} /></button>
-                {/* НОВАЯ КНОПКА СКАЧИВАНИЯ (С ШЕРИНГОМ) */}
                 <button onClick={handleDownloadFromModal} className="p-2 text-indigo-400 hover:text-white"><Download size={20} /></button>
                 <div className="w-px h-6 bg-slate-600 mx-1"></div>
                 <button onClick={() => setActiveModalImage(null)} className="p-2 text-red-400 hover:text-white"><X size={20} /></button>
