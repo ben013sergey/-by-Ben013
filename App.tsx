@@ -20,9 +20,10 @@ import {
     uploadImageToYandex, 
     deleteImageFromYandex,
     notifyAdminNewPrompts,
-    getProxyImageUrl
+    getProxyImageUrl,
+    loadFavoritesFile,
+    saveFavoritesFile
 } from './services/yandexDiskService';
-// ИМПОРТ НОВОГО СЕРВИСА (CloudStorage)
 import { tgStorage } from './services/telegramStorage';
 
 declare global {
@@ -59,7 +60,6 @@ const ITEMS_PER_PAGE = 20;
 const ADMIN_ID = 439014866; 
 const CHANNEL_LINK = "https://t.me/ben013_promt_gallery"; 
 
-// Вспомогательная функция для конвертации URL -> Base64
 const urlToBase64 = async (url: string): Promise<string | null> => {
   try {
     const response = await fetch(url);
@@ -119,48 +119,60 @@ function App() {
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
 
-  // --- ИЗБРАННОЕ (НОВАЯ ФИЧА) ---
   const [favorites, setFavorites] = useState<string[]>([]);
 
-  // Загружаем избранное из Telegram CloudStorage при старте
+  const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
+  const userId = tgUser?.id;
+  const username = tgUser?.username ? `@${tgUser.username}` : (tgUser?.first_name || "Guest");
+  
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlPass = urlParams.get('uid');
+
+  const isAdmin = (userId === ADMIN_ID) || (urlPass === 'ben013');
+
   useEffect(() => {
     const loadFavorites = async () => {
       try {
-        const data = await tgStorage.getItem('pv_favorites');
-        if (data) {
-          const parsed = JSON.parse(data);
-          if (Array.isArray(parsed)) {
-            setFavorites(parsed);
-          }
+        if (isAdmin) {
+            const cloudFavs = await loadFavoritesFile();
+            if (cloudFavs) setFavorites(cloudFavs);
+        } else {
+            const data = await tgStorage.getItem('pv_favorites');
+            if (data) {
+                const parsed = JSON.parse(data);
+                if (Array.isArray(parsed)) setFavorites(parsed);
+            }
         }
       } catch (e) {
-        console.error("Ошибка загрузки избранного:", e);
+        console.error("Fav load error", e);
       }
     };
-    loadFavorites();
-  }, []);
+    if (hasAccess !== null) { 
+        loadFavorites(); 
+    }
+  }, [isAdmin, hasAccess]);
 
   const toggleFavorite = async (id: string) => {
-    // Оптимистичное обновление UI
-    const newFavs = favorites.includes(id) 
-        ? favorites.filter(favId => favId !== id) 
-        : [...favorites, id];
-    
-    setFavorites(newFavs);
+      const newFavs = favorites.includes(id) 
+          ? favorites.filter(favId => favId !== id) 
+          : [...favorites, id];
+      
+      setFavorites(newFavs);
 
-    // Вибрация (для приятного отклика)
-    if (window.Telegram?.WebApp?.HapticFeedback) {
-        window.Telegram.WebApp.HapticFeedback.selectionChanged();
-    }
+      if (window.Telegram?.WebApp?.HapticFeedback) {
+          window.Telegram.WebApp.HapticFeedback.selectionChanged();
+      }
 
-    // Сохранение в облако
-    try {
-        await tgStorage.setItem('pv_favorites', JSON.stringify(newFavs));
-    } catch (e) {
-        console.error("Ошибка сохранения в облако:", e);
-    }
+      if (isAdmin) {
+          await saveFavoritesFile(newFavs); 
+      } else {
+          try {
+              await tgStorage.setItem('pv_favorites', JSON.stringify(newFavs));
+          } catch (e) {
+              console.error("Ошибка сохранения в облако:", e);
+          }
+      }
   };
-  // --------------------------------
 
   const [view, setView] = useState<'list' | 'create'>('list');
   const [loading, setLoading] = useState(false);
@@ -184,15 +196,6 @@ function App() {
   
   const [visibleCount, setVisibleCount] = useState(ITEMS_PER_PAGE);
   const [showScrollTopButton, setShowScrollTopButton] = useState(false);
-
-  const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
-  const userId = tgUser?.id;
-  const username = tgUser?.username ? `@${tgUser.username}` : (tgUser?.first_name || "Guest");
-  
-  const urlParams = new URLSearchParams(window.location.search);
-  const urlPass = urlParams.get('uid');
-
-  const isAdmin = (userId === ADMIN_ID) || (urlPass === 'ben013');
 
   useEffect(() => {
     const checkSubscription = async () => {
@@ -412,10 +415,14 @@ function App() {
          catch(e) { console.error(e); showToast("Фото не загрузилось", "error"); }
       } else { base64Preview = uploadedImage; }
 
+      // ЕСЛИ АДМИН - НЕ СОХРАНЯЕМ МЕТКУ АВТОРА
+      const authorTag = isAdmin ? undefined : username;
+
       const newEntry: PromptData = {
         id: generateId(), originalPrompt: inputPrompt, model: selectedModel, category: inputCategory || "Другое", shortTitle: inputTitle || "Без названия",
         variants: { maleEn: inputPrompt, maleRu: inputPrompt, femaleEn: inputPrompt, femaleRu: inputPrompt, unisexEn: inputPrompt, unisexRu: inputPrompt, male: inputPrompt, female: inputPrompt, unisex: inputPrompt },
-        imageBase64: base64Preview, imagePath: imagePath, note: inputNote.trim(), usageCount: 0, createdAt: Date.now(), generationHistory: [], isSystem: false, createdBy: username
+        imageBase64: base64Preview, imagePath: imagePath, note: inputNote.trim(), usageCount: 0, createdAt: Date.now(), generationHistory: [], isSystem: false, 
+        createdBy: authorTag 
       };
       setPrompts(prev => [newEntry, ...prev]);
       showToast("Сохранено локально!"); clearCreateForm(); setView('list');
@@ -435,9 +442,13 @@ function App() {
          catch(e) { showToast("Ошибка загрузки фото", "error"); }
       } else { base64Preview = uploadedImage; }
 
+      // ЕСЛИ АДМИН - НЕ СОХРАНЯЕМ МЕТКУ АВТОРА
+      const authorTag = isAdmin ? undefined : username;
+
       const newEntry: PromptData = {
         id: generateId(), originalPrompt: inputPrompt, model: selectedModel, category: inputCategory || analysis.category, shortTitle: inputTitle || analysis.shortTitle,
-        variants: analysis.variants, imageBase64: base64Preview, imagePath: imagePath, note: inputNote.trim(), usageCount: 0, createdAt: Date.now(), generationHistory: [], isSystem: false, createdBy: username
+        variants: analysis.variants, imageBase64: base64Preview, imagePath: imagePath, note: inputNote.trim(), usageCount: 0, createdAt: Date.now(), generationHistory: [], isSystem: false, 
+        createdBy: authorTag
       };
       setPrompts(prev => [newEntry, ...prev]);
       showToast("Обработано и сохранено!"); clearCreateForm(); setView('list');
@@ -459,7 +470,7 @@ function App() {
   
   const resetFilters = () => { setSearchQuery(''); setSelectedCategoryFilter('all'); setSelectedAuthorFilter('all'); setSortOrder('newest'); };
 
-  // --- ФИЛЬТРАЦИЯ (ОБНОВЛЕННАЯ С ИЗБРАННЫМ) ---
+  // --- ФИЛЬТРАЦИЯ ---
   const allFilteredPrompts = prompts.filter(p => {
     const s = searchQuery.toLowerCase();
     const matchesSearch = p.shortTitle.toLowerCase().includes(s) || p.originalPrompt.toLowerCase().includes(s);
@@ -487,8 +498,19 @@ function App() {
       return acc;
   }, {} as Record<string, number>);
 
+  // ПОДСЧЕТ КОЛИЧЕСТВА ДЛЯ АВТОРОВ
+  const authorCounts = prompts.reduce((acc, p) => {
+      const author = p.createdBy || 'Неизвестно';
+      acc[author] = (acc[author] || 0) + 1;
+      return acc;
+  }, {} as Record<string, number>);
+
   const allCategories = Array.from(new Set(prompts.map(p => p.category || 'Без категории'))).sort();
-  const allAuthors = Array.from(new Set(prompts.map(p => p.createdBy || 'Неизвестно'))).sort();
+  
+  // ФИЛЬТРАЦИЯ АВТОРОВ (ИСКЛЮЧАЕМ АДМИНА)
+  const allAuthors = Object.keys(authorCounts)
+        .filter(a => a !== 'Неизвестно' && a.toLowerCase() !== '@ben013sergey' && a !== 'ben013')
+        .sort();
 
   const visiblePrompts = allFilteredPrompts.slice(0, visibleCount);
   
@@ -628,7 +650,7 @@ function App() {
                    <select value={selectedAuthorFilter} onChange={(e) => setSelectedAuthorFilter(e.target.value)} className="bg-slate-950 border border-yellow-500/30 text-yellow-500 rounded-lg px-2 py-2 text-sm flex-grow min-w-[140px]">
                      <option value="all">Все авторы</option>
                      {allAuthors.map(a => (
-                        <option key={a} value={a}>{a}</option>
+                        <option key={a} value={a}>{a} ({authorCounts[a]})</option>
                      ))}
                    </select>
                )}
@@ -666,7 +688,7 @@ function App() {
                         onAddHistory={handleAddHistory}
                         isAdmin={isAdmin}
                         // ПЕРЕДАЕМ ДАННЫЕ В КАРТОЧКУ
-                        isFavorite={true}
+                        isFavorite={favorites.includes(p.id)}
                         onToggleFavorite={toggleFavorite}
                       />
                   )) : (
