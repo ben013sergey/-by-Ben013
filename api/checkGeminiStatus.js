@@ -1,58 +1,143 @@
-export default async function handler(req, res) {
-  // Настройка CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+// services/geminiService.ts
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
-
-  const { uuid } = req.query;
-  const API_KEY = process.env.GEMINIGEN_API_KEY;
-
-  if (!API_KEY) return res.status(500).json({ error: "Нет ключа API" });
-  if (!uuid) return res.status(400).json({ error: "Нет UUID задачи" });
-
-  const HISTORY_URL = "https://api.geminigen.ai/uapi/v1/histories";
-
+// 1. АНАЛИЗ ТЕКСТА
+export const analyzePrompt = async (promptText: string) => {
   try {
-    // Запрашиваем последние 10 записей истории
-    const response = await fetch(`${HISTORY_URL}?items_per_page=10&page=1`, {
-      method: "GET",
-      headers: { "x-api-key": API_KEY }
+    const response = await fetch('/api/openrouter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: promptText }),
     });
 
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Server error: ${response.status} ${errText}`);
+    }
+
     const data = await response.json();
-
-    // Ищем нашу задачу
-    const task = data.result?.find(item => item.uuid === uuid);
-
-    if (!task) {
-      // Если задачи нет в списке, возможно, она старая или ошибка ID. 
-      // Пока скажем "ждите", вдруг она появится на следующей странице истории (редко).
-      return res.status(200).json({ status: 'processing' });
-    }
-
-    // Статус 2 = Готово (Completed)
-    if (task.status === 2 && task.generate_result) {
-      return res.status(200).json({ 
-          status: 'completed', 
-          url: task.generate_result 
-      });
-    }
-
-    // Статус > 2 = Ошибка (Failed)
-    if (task.status > 2) {
-      return res.status(200).json({ 
-          status: 'failed', 
-          error: task.error_message || "Ошибка генерации на стороне GeminiGen"
-      });
-    }
-
-    // Любой другой статус = В процессе
-    return res.status(200).json({ status: 'processing' });
+    return data;
 
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: error.message });
+    console.error("AI Analysis Error:", error);
+    return {
+      shortTitle: "Без обработки",
+      category: "Другое",
+      variants: {
+        maleEn: promptText, maleRu: promptText,
+        femaleEn: promptText, femaleRu: promptText,
+        unisexEn: promptText, unisexRu: promptText
+      }
+    };
   }
-}
+};
+
+const getDimensions = (ratio: string) => {
+  switch (ratio) {
+    case '16:9': return { w: 1280, h: 720 };
+    case '9:16': return { w: 720, h: 1280 };
+    case '4:3':  return { w: 1024, h: 768 };
+    case '3:4':  return { w: 768, h: 1024 };
+    case '21:9': return { w: 1280, h: 544 };
+    case '1:1': 
+    default:     return { w: 1024, h: 1024 };
+  }
+};
+
+// 2. ГЕНЕРАЦИЯ КАРТИНКИ
+export const generateNanoBananaImage = async (
+  prompt: string, 
+  refImage?: string | null, 
+  aspectRatio: string = '1:1',
+  provider: 'pollinations' | 'huggingface' | 'google' = 'pollinations'
+) => {
+  try {
+    const { w, h } = getDimensions(aspectRatio);
+    const seed = Math.floor(Math.random() * 100000);
+    const encodedPrompt = encodeURIComponent(prompt);
+
+    let imageUrl = "";
+
+    // --- Pollinations ---
+    if (provider === 'pollinations') {
+        imageUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux`;
+    }
+
+    // --- HuggingFace ---
+    else if (provider === 'huggingface') {
+        const hqPrompt = encodeURIComponent(`${prompt}, hyperrealistic, 8k resolution, cinematic lighting, masterpiece`);
+        imageUrl = `https://image.pollinations.ai/prompt/${hqPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux-realism&enhance=true`;
+    }
+
+    // --- GOOGLE (GeminiGen) ---
+    else if (provider === 'google') {
+        // 1. Запуск
+        const startResponse = await fetch('/api/googleImage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                prompt: prompt,
+                aspectRatio: aspectRatio,
+                image: refImage
+            }),
+        });
+
+        if (!startResponse.ok) {
+            const err = await startResponse.text();
+            throw new Error(`Ошибка запуска: ${err}`);
+        }
+
+        const startData = await startResponse.json();
+
+        if (startData.status === 'completed' && startData.url) {
+            imageUrl = startData.url;
+        } 
+        else if (startData.status === 'queued' && startData.uuid) {
+            const uuid = startData.uuid;
+            let attempts = 0;
+            
+            // === ИЗМЕНЕНИЕ ЗДЕСЬ: ЖДЕМ ДО 10 МИНУТ ===
+            // 300 попыток * 2 секунды = 600 секунд (10 минут)
+            const maxAttempts = 300; 
+
+            while (attempts < maxAttempts) {
+                await new Promise(r => setTimeout(r, 2000));
+                
+                const statusRes = await fetch(`/api/checkGeminiStatus?uuid=${uuid}`);
+                const statusData = await statusRes.json();
+
+                console.log(`Polling (${attempts}/${maxAttempts}):`, statusData.status);
+
+                if (statusData.status === 'completed' && statusData.url) {
+                    imageUrl = statusData.url;
+                    break; 
+                }
+
+                if (statusData.status === 'failed') {
+                    throw new Error(`Ошибка GeminiGen: ${statusData.error}`);
+                }
+
+                attempts++;
+            }
+
+            if (!imageUrl) {
+                throw new Error("Тайм-аут: генерация заняла более 10 минут.");
+            }
+        }
+    }
+
+    // Задержка только для Pollinations
+    if (provider !== 'google') {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+
+    return {
+      url: imageUrl,
+      prompt: prompt,
+      createdAt: Date.now()
+    };
+
+  } catch (error) {
+    console.error("Image Gen Error:", error);
+    throw error;
+  }
+};
