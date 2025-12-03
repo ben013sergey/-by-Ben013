@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { PromptData, VALID_CATEGORIES, AspectRatio, GeneratedImage } from '../types';
-import { Copy, Check, Trash2, Image as ImageIcon, X, Maximize2, Clock, Edit2, Play, Loader2, Upload, Pencil, ZoomIn, ZoomOut, Download, RotateCcw, StickyNote, Scaling, Languages, Lock, Aperture, User, ExternalLink, Share2 } from 'lucide-react';
+import { Copy, Check, Trash2, Image as ImageIcon, X, Maximize2, Clock, Edit2, Play, Loader2, Upload, Pencil, ZoomIn, ZoomOut, Download, RotateCcw, StickyNote, Scaling, Languages, Lock, Aperture, User, ExternalLink } from 'lucide-react';
 import { generateNanoBananaImage } from '../services/geminiService';
 import { getProxyImageUrl } from '../services/yandexDiskService';
 
@@ -30,6 +30,9 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const [activeModalImage, setActiveModalImage] = useState<string | null>(null);
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
+  // Состояние загрузки картинки (для скелетона)
+  const [isImageLoaded, setIsImageLoaded] = useState(false);
+
   // Ссылка на картинку через прокси
   const finalImageSrc = data.imagePath 
     ? getProxyImageUrl(data.imagePath) 
@@ -56,6 +59,65 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
 
   const canEdit = isAdmin || !data.isSystem;
 
+  // --- 1. ТАКТИЛЬНЫЙ ОТКЛИК (HAPTIC FEEDBACK) ---
+  const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft' = 'light') => {
+    // @ts-ignore
+    if (window.Telegram?.WebApp?.HapticFeedback) {
+        // @ts-ignore
+        window.Telegram.WebApp.HapticFeedback.impactOccurred(style);
+    }
+  };
+
+  const triggerNotification = (type: 'success' | 'warning' | 'error') => {
+    // @ts-ignore
+    if (window.Telegram?.WebApp?.HapticFeedback) {
+        // @ts-ignore
+        window.Telegram.WebApp.HapticFeedback.notificationOccurred(type);
+    }
+  };
+
+  // --- 2. ГИРОСКОП ДЛЯ МОБИЛЬНЫХ (3D ЭФФЕКТ) ---
+  useEffect(() => {
+    const handleOrientation = (e: DeviceOrientationEvent) => {
+        // Проверяем, что мы не наводим мышкой (приоритет мыши, если она есть)
+        if (isHovered) return;
+
+        // Ограничиваем углы наклона, чтобы карточка не крутилась слишком сильно
+        const MAX_TILT = 15;
+        
+        // beta: наклон вперед-назад (-180 до 180) -> вращение по X
+        // gamma: наклон влево-вправо (-90 до 90) -> вращение по Y
+        let x = e.beta || 0; 
+        let y = e.gamma || 0;
+
+        // Калибровка "комфортного угла" (телефон обычно держат под углом ~45 град)
+        x = x - 45; 
+
+        // Ограничиваем значения
+        if (x > MAX_TILT) x = MAX_TILT;
+        if (x < -MAX_TILT) x = -MAX_TILT;
+        if (y > MAX_TILT) y = MAX_TILT;
+        if (y < -MAX_TILT) y = -MAX_TILT;
+
+        // Инвертируем для правильного параллакса
+        setRotateX(-x); 
+        setRotateY(y);
+    };
+
+    // Проверяем, мобильное ли устройство
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+    if (isMobile && window.DeviceOrientationEvent) {
+        window.addEventListener('deviceorientation', handleOrientation);
+    }
+
+    return () => {
+        if (isMobile) {
+            window.removeEventListener('deviceorientation', handleOrientation);
+        }
+    };
+  }, [isHovered]);
+
   const getCurrentText = () => {
     if (activeVariant === GenderVariant.Female) return showRussian ? (data.variants.femaleRu || data.variants.female) : (data.variants.femaleEn || data.variants.female);
     if (activeVariant === GenderVariant.Male) return showRussian ? (data.variants.maleRu || data.variants.male) : (data.variants.maleEn || data.variants.male);
@@ -76,6 +138,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   }, [activeModalImage]);
 
   const handleCopy = () => {
+    triggerHaptic('light'); // Вибрация при копировании
     navigator.clipboard.writeText(getCurrentText() || "");
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -85,37 +148,31 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     return new Date(timestamp).toLocaleString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
-  // --- ИСПРАВЛЕННАЯ ФУНКЦИЯ СКАЧИВАНИЯ ---
   const handleDownload = async (imageUrl: string | null, fileName: string) => {
     if (!imageUrl) return;
+    triggerHaptic('medium'); // Вибрация при скачивании
 
     try {
-        // 1. Получаем файл (Blob)
         const response = await fetch(imageUrl);
         const blob = await response.blob();
         
-        // 2. Определяем, мобильное ли это устройство
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
-        // 3. ЛОГИКА ДЛЯ МОБИЛЬНЫХ (Telegram)
         if (isMobile) {
             const file = new File([blob], `${fileName}.png`, { type: 'image/png' });
-            // Пробуем нативное меню "Поделиться"
             if (navigator.canShare && navigator.canShare({ files: [file] })) {
                 try {
                     await navigator.share({
                         files: [file],
                         title: fileName,
                     });
-                    return; // Если успешно поделились - выходим
+                    return;
                 } catch (shareError) {
-                    console.log("Share API cancelled or failed, falling back to download");
+                    console.log("Share API cancelled");
                 }
             }
         }
 
-        // 4. ЛОГИКА ДЛЯ ПК (ИЛИ ЕСЛИ SHARE НЕ СРАБОТАЛ)
-        // Классическое принудительное скачивание
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
@@ -123,7 +180,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
         document.body.appendChild(link);
         link.click();
         
-        // Чистим за собой
         setTimeout(() => {
             document.body.removeChild(link);
             window.URL.revokeObjectURL(url);
@@ -131,7 +187,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
 
     } catch (e) {
         console.error("Download failed:", e);
-        // Аварийный вариант - просто открыть картинку в новой вкладке
         window.open(imageUrl, '_blank');
     }
   };
@@ -146,9 +201,9 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     }
   };
 
-  // --- ЛОГИКА ГЕНЕРАЦИИ ---
   const handleTestGeneration = async () => {
-    // 1. СПЕЦ-РЕЖИМ ДЛЯ АДМИНА
+    triggerHaptic('medium'); // Вибрация при нажатии
+
     if (genModel === 'google' && isAdmin) {
         const promptToUse = getGenerationText();
         let textToCopy = `Create a photorealistic image: ${promptToUse}. Aspect ratio ${aspectRatio}.`;
@@ -161,7 +216,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
         }
 
         navigator.clipboard.writeText(textToCopy);
-        
         openExternalLink('https://gemini.google.com/app');
         
         setAdminCopiedInfo(notifyMsg);
@@ -169,7 +223,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
         return;
     }
 
-    // 2. ОБЫЧНЫЙ РЕЖИМ
     setIsGenerating(true);
     setGenError(null);
     setGeneratedImage(null);
@@ -181,7 +234,9 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
       const result = await generateNanoBananaImage(promptToUse, testReferenceImage, aspectRatio, genModel as 'pollinations' | 'huggingface');
       
       setGeneratedImage(result.url);
+      triggerNotification('success'); // Успешная вибрация
       onUsageUpdate(data.id);
+      
       const newHistoryItem: GeneratedImage = {
         id: Date.now().toString(),
         url: result.url,
@@ -191,6 +246,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
       onAddHistory(data.id, newHistoryItem);
       if (!showHistory && (data.generationHistory?.length || 0) > 0) setShowHistory(true);
     } catch (e: any) {
+      triggerNotification('error'); // Вибрация ошибки
       setGenError(e.message || "Ошибка генерации.");
     } finally {
       setIsGenerating(false);
@@ -224,12 +280,18 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const handleWheel = (e: React.WheelEvent) => { if (e.ctrlKey || activeModalImage) { if (e.deltaY < 0) setZoomLevel(prev => Math.min(prev + 0.1, 5)); else setZoomLevel(prev => Math.max(prev - 0.1, 0.5)); }};
   const aspectRatioOptions: AspectRatio[] = ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9'];
 
+  // Переключение вариантов (тоже с вибрацией)
+  const setVariantWithHaptic = (variant: GenderVariant) => {
+      triggerHaptic('light');
+      setActiveVariant(variant);
+  };
+
   return (
     <>
       <div 
         ref={cardRef} onMouseMove={handleCardMouseMove} onMouseEnter={handleCardMouseEnter} onMouseLeave={handleCardMouseLeave}
         className={`bg-gradient-to-br from-slate-800 to-indigo-900/30 rounded-xl border ${data.isSystem ? 'border-indigo-500/20' : 'border-emerald-500/40'} overflow-hidden shadow-md hover:shadow-2xl transition-all duration-200 w-full transform-gpu`}
-        style={{ transform: `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale(${isHovered ? 1.01 : 1})`, transformStyle: 'preserve-3d' }}
+        style={{ transform: `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale(${isHovered || rotateX !== 0 ? 1.01 : 1})`, transformStyle: 'preserve-3d' }}
       >
         <div className="p-4 flex flex-col md:flex-row gap-6" style={{ transform: 'translateZ(20px)' }}>
           <div className="flex-shrink-0 flex flex-col items-center gap-3 md:w-48">
@@ -237,10 +299,26 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                <div className={`flex items-center justify-center w-8 h-8 rounded-full font-bold text-sm border ${data.isSystem ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50' : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50'}`}>#{index + 1}</div>
                <div className="text-xs text-slate-400 font-mono bg-slate-900 px-2 py-1 rounded">{data.model}</div>
             </div>
+            
+            {/* ГЛАВНАЯ КАРТИНКА + СКЕЛЕТОН */}
             <div className={`w-full aspect-square rounded-lg overflow-hidden bg-slate-900 border border-slate-700 relative group ${finalImageSrc ? 'cursor-pointer' : ''}`} onClick={() => finalImageSrc && setActiveModalImage(finalImageSrc)}>
+              
+              {/* 3. СКЕЛЕТОН (Показывается, пока грузится картинка) */}
+              {!isImageLoaded && finalImageSrc && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-slate-800 animate-pulse z-10">
+                      <ImageIcon className="text-slate-600 w-10 h-10 opacity-50" />
+                  </div>
+              )}
+
               {finalImageSrc ? (
                 <>
-                    <img src={finalImageSrc} alt={data.shortTitle} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/>
+                    <img 
+                        src={finalImageSrc} 
+                        alt={data.shortTitle} 
+                        // opacity-0 если не загрузилась, 100 если загрузилась
+                        className={`w-full h-full object-cover group-hover:scale-105 transition-all duration-500 ${isImageLoaded ? 'opacity-100' : 'opacity-0'}`}
+                        onLoad={() => setIsImageLoaded(true)}
+                    />
                     <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
                         <button onClick={handleMainImageClick} className="absolute top-2 left-2 p-1.5 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md z-10"><Download size={16} /></button>
                         <button className="p-2 bg-black/50 hover:bg-black/80 rounded-full text-white transition-colors shadow-md transform scale-90 group-hover:scale-100"><Maximize2 size={24} /></button>
@@ -248,12 +326,13 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                 </>
               ) : (<div className="w-full h-full flex flex-col items-center justify-center text-slate-500"><ImageIcon size={32} /><span className="text-xs mt-2">Нет фото</span></div>)}
             </div>
+            
             {isAdmin && data.author && (<div className="flex items-center gap-1 mt-auto px-2 py-1 bg-slate-900/80 rounded border border-indigo-500/30 text-[10px] text-indigo-300"><User size={10} /><span>by {data.author}</span></div>)}
             <div className="flex items-center gap-1.5 text-[10px] text-slate-500 mt-1"><Clock size={10} /><span>{formatDate(data.createdAt)}</span></div>
           </div>
 
           <div className="flex-grow flex flex-col min-w-0">
-            {/* Текст и управление (без изменений) */}
+            {/* ТЕКСТ И КНОПКИ (без изменений, кроме вызова setVariantWithHaptic) */}
             <div className="flex justify-between items-start mb-3">
               <div className="flex flex-col relative flex-grow mr-4 min-w-0">
                 <div className="group relative inline-flex items-center gap-1 mb-1 cursor-pointer" onClick={() => canEdit && setShowCategoryDropdown(!showCategoryDropdown)}>
@@ -272,13 +351,17 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
 
             {data.note && <div className="mb-3 px-3 py-2 bg-yellow-500/5 border border-yellow-500/20 rounded-lg text-xs text-yellow-200/80 flex items-start gap-2"><StickyNote size={14} className="mt-0.5 text-yellow-500/50 flex-shrink-0" /><span className="whitespace-pre-wrap leading-relaxed break-words">{data.note}</span></div>}
 
-            <div className="flex flex-wrap gap-2 mb-3">{[GenderVariant.Female, GenderVariant.Male, GenderVariant.Unisex].map((variant) => (<button key={variant} onClick={() => setActiveVariant(variant)} className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${activeVariant === variant ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>{variant === GenderVariant.Female ? 'Девушка' : variant === GenderVariant.Male ? 'Парень' : 'Унисекс'}</button>))}</div>
+            <div className="flex flex-wrap gap-2 mb-3">
+                {[GenderVariant.Female, GenderVariant.Male, GenderVariant.Unisex].map((variant) => (
+                    <button key={variant} onClick={() => setVariantWithHaptic(variant)} className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${activeVariant === variant ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>{variant === GenderVariant.Female ? 'Девушка' : variant === GenderVariant.Male ? 'Парень' : 'Унисекс'}</button>
+                ))}
+            </div>
 
             <div className="bg-slate-900/50 rounded-lg border border-slate-700/50 flex-grow grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-slate-700/50">
               <div className="p-3 lg:col-span-2 flex flex-col relative group">
                 <p className="text-sm text-slate-300 font-mono leading-relaxed break-words whitespace-pre-wrap flex-grow h-full max-h-[300px] overflow-y-auto">{getCurrentText()}</p>
                 <div className="flex justify-end gap-2 mt-2">
-                  <button onClick={() => setShowRussian(!showRussian)} className={`p-2 rounded-md transition-all text-xs flex items-center gap-1 ${showRussian ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-blue-400'}`}><Languages size={14} /><span>{showRussian ? 'RU' : 'EN'}</span></button>
+                  <button onClick={() => { triggerHaptic('light'); setShowRussian(!showRussian); }} className={`p-2 rounded-md transition-all text-xs flex items-center gap-1 ${showRussian ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-blue-400'}`}><Languages size={14} /><span>{showRussian ? 'RU' : 'EN'}</span></button>
                   <button onClick={handleCopy} className="p-2 rounded-md bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-all border border-slate-600 flex items-center gap-2 text-xs">{copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}<span>{copied ? 'Copied' : 'Copy'}</span></button>
                 </div>
               </div>
@@ -320,7 +403,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
         </div>
       </div>
       
-      {/* МОДАЛЬНОЕ ОКНО */}
+      {/* МОДАЛКА (без изменений) */}
       {activeModalImage && (
         <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center overflow-hidden" onWheel={handleWheel}>
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[110] flex items-center gap-2 bg-slate-800/90 border border-slate-700 rounded-full px-4 py-2 shadow-2xl backdrop-blur-md">
