@@ -46,6 +46,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const [showHistory, setShowHistory] = useState(false);
   const [adminCopiedInfo, setAdminCopiedInfo] = useState<string | null>(null);
 
+  // Zoom & Parallax State
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panPosition, setPanPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -57,6 +58,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
 
   const canEdit = isAdmin || !data.isSystem;
 
+  // --- HAPTIC FEEDBACK ---
   const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft' = 'medium') => {
     // @ts-ignore
     if (window.Telegram?.WebApp?.HapticFeedback) {
@@ -73,6 +75,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     }
   };
 
+  // --- ГИРОСКОП ---
   useEffect(() => {
     const handleOrientation = (e: DeviceOrientationEvent) => {
         if (isHovered) return;
@@ -137,6 +140,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
         const response = await fetch(imageUrl);
         const blob = await response.blob();
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        
         if (isMobile) {
             const file = new File([blob], `${fileName}.png`, { type: 'image/png' });
             if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -151,6 +155,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                 }
             }
         }
+        
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
@@ -203,6 +208,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
       setGeneratedImage(result.url);
       triggerNotification('success');
       onUsageUpdate(data.id);
+      
       const newHistoryItem: GeneratedImage = {
         id: Date.now().toString(),
         url: result.url,
@@ -234,7 +240,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const handleWheel = (e: React.WheelEvent) => { if (e.ctrlKey || activeModalImage) { if (e.deltaY < 0) setZoomLevel(prev => Math.min(prev + 0.1, 5)); else setZoomLevel(prev => Math.max(prev - 0.1, 0.5)); }};
   const aspectRatioOptions: AspectRatio[] = ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9'];
 
-  // ИЗМЕНЕНИЯ ЗДЕСЬ: Улучшенная верстка футера карточки
+  // ИЗМЕНЕНИЕ В КНОПКЕ ИЗБРАННОГО НИЖЕ (whitespace-nowrap + текст "Избранное")
   return (
     <>
       <div 
@@ -262,14 +268,14 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
               ) : (<div className="w-full h-full flex flex-col items-center justify-center text-slate-500"><ImageIcon size={32} /><span className="text-xs mt-2">Нет фото</span></div>)}
             </div>
             
-            {/* КНОПКА ИЗБРАННОГО И ДАТА: Исправленная верстка */}
+            {/* КНОПКА ИЗБРАННОГО: ФИКС */}
             <div className="flex items-center justify-between w-full mt-3 gap-3">
                 <button 
                     onClick={(e) => { e.stopPropagation(); triggerHaptic('medium'); onToggleFavorite(data.id); }}
-                    className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all flex-grow shadow-md border ${isFavorite ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50 hover:bg-indigo-600/30' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white'}`}
+                    className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all flex-grow shadow-md border whitespace-nowrap ${isFavorite ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/50 hover:bg-indigo-600/30' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white'}`}
                 >
                     <Heart size={14} className={isFavorite ? "fill-indigo-400" : ""} />
-                    <span>{isFavorite ? 'В избранном' : 'В избранное'}</span>
+                    <span>Избранное</span>
                 </button>
                 
                 <div className="flex flex-col items-end text-[10px] text-slate-500 flex-shrink-0">
@@ -282,8 +288,7 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
           </div>
 
           <div className="flex-grow flex flex-col min-w-0">
-             {/* Остальная часть карточки (текст и генерация) без изменений */}
-             {/* ... */}
+             {/* Остальная часть без изменений */}
              <div className="flex justify-between items-start mb-3">
               <div className="flex flex-col relative flex-grow mr-4 min-w-0">
                 <div className="group relative inline-flex items-center gap-1 mb-1 cursor-pointer" onClick={() => canEdit && setShowCategoryDropdown(!showCategoryDropdown)}>
