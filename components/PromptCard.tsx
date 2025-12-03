@@ -85,6 +85,44 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     return new Date(timestamp).toLocaleString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
+  // --- УМНОЕ СКАЧИВАНИЕ (РАБОТАЕТ В TELEGRAM) ---
+  const handleDownloadImage = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!activeModalImage) return;
+
+    const filename = `gen_${Date.now()}.png`;
+
+    try {
+        // 1. Превращаем Base64 или URL в Blob (файл в памяти)
+        const response = await fetch(activeModalImage);
+        const blob = await response.blob();
+        const file = new File([blob], filename, { type: blob.type });
+
+        // 2. Если это мобилка (Telegram) - используем нативное меню "Поделиться"
+        // Это позволяет сохранить в Галерею или Файлы
+        if (navigator.share && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+                files: [file],
+                title: 'Сохранить картинку'
+            });
+        } else {
+            // 3. Если это ПК - классическое скачивание через ссылку
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+        }
+    } catch (err) {
+        console.error("Ошибка скачивания, пробуем fallback:", err);
+        // Аварийный вариант - просто открыть в новой вкладке
+        window.open(activeModalImage, '_blank');
+    }
+  };
+
   // --- ЛОГИКА ГЕНЕРАЦИИ ---
   const handleTestGeneration = async () => {
     // 1. СПЕЦ-РЕЖИМ ДЛЯ АДМИНА (Google Manual)
@@ -94,19 +132,16 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
         
         let notifyMsg = "✅ Промпт скопирован! Вставьте в чат (Ctrl+V).";
 
-        // Если была картинка, добавляем подсказку в текст (для себя) и в уведомление
         if (testReferenceImage) {
             textToCopy += " (Use uploaded image as reference)";
             notifyMsg = "⚠️ Промпт скопирован! Картинку загрузите вручную.";
         }
 
-        // Копируем в буфер
         navigator.clipboard.writeText(textToCopy);
         
-        // Открываем Gemini (Универсальный метод: и для WEB, и для TG)
         const googleUrl = 'https://gemini.google.com/app';
         
-        // @ts-ignore - проверяем наличие Telegram API
+        // @ts-ignore
         if (window.Telegram?.WebApp?.openLink) {
             // @ts-ignore
             window.Telegram.WebApp.openLink(googleUrl);
@@ -114,13 +149,12 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
             window.open(googleUrl, '_blank');
         }
         
-        // Показываем уведомление
         setAdminCopiedInfo(notifyMsg);
         setTimeout(() => setAdminCopiedInfo(null), 6000);
         return;
     }
 
-    // 2. ОБЫЧНЫЙ РЕЖИМ (Pollinations / Flux)
+    // 2. ОБЫЧНЫЙ РЕЖИМ
     setIsGenerating(true);
     setGenError(null);
     setGeneratedImage(null);
@@ -148,15 +182,51 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     }
   };
   
+  // Handlers UI
   const handleRefUpload = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) { const reader = new FileReader(); reader.onloadend = () => setTestReferenceImage(reader.result as string); reader.readAsDataURL(file); }};
-  const handleMainImageDownload = (e: React.MouseEvent) => { e.stopPropagation(); if (finalImageSrc) { const link = document.createElement('a'); link.href = finalImageSrc; link.download = `${data.shortTitle}_ref.png`; document.body.appendChild(link); link.click(); document.body.removeChild(link); }};
+  const handleMainImageDownload = (e: React.MouseEvent) => { 
+      // Используем ту же умную логику и для главной картинки
+      e.stopPropagation(); 
+      if (finalImageSrc) {
+          // Вызываем нашу новую функцию, подменив activeModalImage на finalImageSrc временно
+          const fakeEvent = { stopPropagation: () => {} } as React.MouseEvent;
+          // Тут небольшой хак, чтобы не дублировать код, но лучше вызывать напрямую:
+          downloadImageByUrl(finalImageSrc);
+      }
+  };
+
+  // Вспомогательная функция для скачивания (чтобы использовать и в модалке, и на главной)
+  const downloadImageByUrl = async (url: string) => {
+      const filename = `prompt_${Date.now()}.png`;
+      try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const file = new File([blob], filename, { type: blob.type });
+        if (navigator.share && navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: 'Сохранить картинку' });
+        } else {
+            const blobUrl = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(blobUrl);
+        }
+      } catch(e) { window.open(url, '_blank'); }
+  };
+
   const handleCardMouseMove = (e: React.MouseEvent<HTMLDivElement>) => { if (!cardRef.current) return; const rect = cardRef.current.getBoundingClientRect(); const x = e.clientX - rect.left; const y = e.clientY - rect.top; const centerX = rect.width / 2; const centerY = rect.height / 2; setRotateX(((y - centerY) / centerY) * -3); setRotateY(((x - centerX) / centerX) * 3); };
   const handleCardMouseEnter = () => setIsHovered(true);
   const handleCardMouseLeave = () => { setIsHovered(false); setRotateX(0); setRotateY(0); };
+  
+  // Modal Handlers
   const handleZoomIn = (e: React.MouseEvent) => { e.stopPropagation(); setZoomLevel(prev => Math.min(prev + 0.5, 5)); };
   const handleZoomOut = (e: React.MouseEvent) => { e.stopPropagation(); setZoomLevel(prev => Math.max(prev - 0.5, 0.5)); };
   const handleResetZoom = (e: React.MouseEvent) => { e.stopPropagation(); setZoomLevel(1); setPanPosition({ x: 0, y: 0 }); };
-  const handleDownloadImage = (e: React.MouseEvent) => { e.stopPropagation(); if (activeModalImage) { const link = document.createElement('a'); link.href = activeModalImage; link.download = `generated_${Date.now()}.png`; document.body.appendChild(link); link.click(); document.body.removeChild(link); }};
+  
+  // Dragging Logic
   const handleMouseDown = (e: React.MouseEvent) => { e.preventDefault(); if (zoomLevel > 1) { setIsDragging(true); dragStartRef.current = { x: e.clientX - panPosition.x, y: e.clientY - panPosition.y }; }};
   const handleMouseMove = (e: React.MouseEvent) => { if (isDragging && dragStartRef.current) { e.preventDefault(); setPanPosition({ x: e.clientX - dragStartRef.current.x, y: e.clientY - dragStartRef.current.y }); }};
   const handleMouseUp = () => { setIsDragging(false); dragStartRef.current = null; };
@@ -242,7 +312,11 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                       <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"><Scaling size={12} /></div>
                     </div>
                     <div className="relative flex-1">
-                      <select value={genModel} onChange={(e) => setGenModel(e.target.value as ModelProvider)} className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-[10px] text-slate-300 outline-none appearance-none">
+                      <select 
+                          value={genModel} 
+                          onChange={(e) => setGenModel(e.target.value as ModelProvider)} 
+                          className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-[10px] text-slate-300 outline-none appearance-none"
+                      >
                         <option value="pollinations">Fast (Free)</option>
                         <option value="huggingface">HQ (Flux)</option>
                         {isAdmin && <option value="google">Nano Banana (Pro)</option>}
@@ -260,7 +334,37 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
           </div>
         </div>
       </div>
-      {activeModalImage && (<div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center overflow-hidden" onWheel={handleWheel}><div className="absolute top-4 left-1/2 -translate-x-1/2 z-[110] flex items-center gap-2 bg-slate-800/90 border border-slate-700 rounded-full px-4 py-2 shadow-2xl backdrop-blur-md"><button onClick={handleZoomOut} className="p-2 text-slate-300 hover:text-white"><ZoomOut size={20} /></button><span className="text-xs text-slate-400 w-12 text-center">{Math.round(zoomLevel * 100)}%</span><button onClick={handleZoomIn} className="p-2 text-slate-300 hover:text-white"><ZoomIn size={20} /></button><div className="w-px h-6 bg-slate-600 mx-1"></div><button onClick={handleResetZoom} className="p-2 text-slate-300 hover:text-white"><RotateCcw size={20} /></button><button onClick={handleDownloadImage} className="p-2 text-indigo-400 hover:text-white"><Download size={20} /></button><div className="w-px h-6 bg-slate-600 mx-1"></div><button onClick={() => setActiveModalImage(null)} className="p-2 text-red-400 hover:text-white"><X size={20} /></button></div><div className={`w-full h-full flex items-center justify-center ${zoomLevel > 1 ? 'cursor-move' : 'cursor-default'}`} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}><img src={activeModalImage} alt="Full view" className="max-w-none transition-transform duration-75 ease-linear select-none" style={{ transform: `translate(${panPosition.x}px, ${panPosition.y}px) scale(${zoomLevel})`, maxHeight: zoomLevel === 1 ? '90vh' : 'none', maxWidth: zoomLevel === 1 ? '90vw' : 'none' }} draggable={false}/></div></div>)}
+      
+      {/* МОДАЛЬНОЕ ОКНО ПРОСМОТРА */}
+      {activeModalImage && (
+        <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center overflow-hidden" onWheel={handleWheel}>
+            {/* ПАНЕЛЬ УПРАВЛЕНИЯ */}
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[110] flex items-center gap-2 bg-slate-800/90 border border-slate-700 rounded-full px-4 py-2 shadow-2xl backdrop-blur-md">
+                <button onClick={handleZoomOut} className="p-2 text-slate-300 hover:text-white" title="Уменьшить"><ZoomOut size={20} /></button>
+                <span className="text-xs text-slate-400 w-12 text-center select-none">{Math.round(zoomLevel * 100)}%</span>
+                <button onClick={handleZoomIn} className="p-2 text-slate-300 hover:text-white" title="Увеличить"><ZoomIn size={20} /></button>
+                <div className="w-px h-6 bg-slate-600 mx-1"></div>
+                <button onClick={handleResetZoom} className="p-2 text-slate-300 hover:text-white" title="Сброс"><RotateCcw size={20} /></button>
+                <button onClick={handleDownloadImage} className="p-2 text-indigo-400 hover:text-white" title="Скачать"><Download size={20} /></button>
+                <div className="w-px h-6 bg-slate-600 mx-1"></div>
+                <button onClick={() => setActiveModalImage(null)} className="p-2 text-red-400 hover:text-white" title="Закрыть"><X size={20} /></button>
+            </div>
+            
+            {/* КАРТИНКА */}
+            <div 
+                className={`w-full h-full flex items-center justify-center ${zoomLevel > 1 ? 'cursor-move' : 'cursor-default'}`} 
+                onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
+            >
+                <img 
+                    src={activeModalImage} 
+                    alt="Full view" 
+                    className="max-w-none transition-transform duration-75 ease-linear select-none" 
+                    style={{ transform: `translate(${panPosition.x}px, ${panPosition.y}px) scale(${zoomLevel})`, maxHeight: zoomLevel === 1 ? '90vh' : 'none', maxWidth: zoomLevel === 1 ? '90vw' : 'none' }} 
+                    draggable={false}
+                />
+            </div>
+        </div>
+      )}
     </>
   );
 };
