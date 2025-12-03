@@ -1,6 +1,6 @@
 // services/geminiService.ts
 
-// 1. АНАЛИЗ ТЕКСТА (Оставляем без изменений)
+// 1. АНАЛИЗ ТЕКСТА
 export const analyzePrompt = async (promptText: string) => {
   try {
     const response = await fetch('/api/openrouter', {
@@ -68,9 +68,9 @@ export const generateNanoBananaImage = async (
         imageUrl = `https://image.pollinations.ai/prompt/${hqPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux-realism&enhance=true`;
     }
 
-    // --- GOOGLE (GeminiGen - Async Polling) ---
+    // --- GOOGLE (GeminiGen) ---
     else if (provider === 'google') {
-        // 1. Запускаем задачу
+        // 1. Запуск
         const startResponse = await fetch('/api/googleImage', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -83,51 +83,49 @@ export const generateNanoBananaImage = async (
 
         if (!startResponse.ok) {
             const err = await startResponse.text();
-            throw new Error(`Ошибка запуска GeminiGen: ${err}`);
+            throw new Error(`Ошибка запуска: ${err}`);
         }
 
         const startData = await startResponse.json();
 
-        // Если картинка готова сразу (бывает)
         if (startData.status === 'completed' && startData.url) {
             imageUrl = startData.url;
         } 
-        // Если задача в очереди - начинаем ждать (Polling)
         else if (startData.status === 'queued' && startData.uuid) {
             const uuid = startData.uuid;
             let attempts = 0;
-            const maxAttempts = 60; // Ждем максимум 2 минуты (60 * 2сек)
+            
+            // === ИЗМЕНЕНИЕ ЗДЕСЬ: ЖДЕМ ДО 10 МИНУТ ===
+            // 300 попыток * 2 секунды = 600 секунд (10 минут)
+            const maxAttempts = 600; 
 
             while (attempts < maxAttempts) {
-                // Ждем 2 секунды
                 await new Promise(r => setTimeout(r, 2000));
                 
-                // Спрашиваем статус
                 const statusRes = await fetch(`/api/checkGeminiStatus?uuid=${uuid}`);
                 const statusData = await statusRes.json();
 
-                console.log(`Polling GeminiGen (${attempts}/${maxAttempts}):`, statusData.status);
+                console.log(`Polling (${attempts}/${maxAttempts}):`, statusData.status);
 
                 if (statusData.status === 'completed' && statusData.url) {
                     imageUrl = statusData.url;
-                    break; // Успех!
+                    break; 
                 }
 
                 if (statusData.status === 'failed') {
-                    throw new Error(`Ошибка генерации GeminiGen: ${statusData.error}`);
+                    throw new Error(`Ошибка GeminiGen: ${statusData.error}`);
                 }
 
-                // Если processing - продолжаем цикл
                 attempts++;
             }
 
             if (!imageUrl) {
-                throw new Error("Тайм-аут: сервер GeminiGen обрабатывает запрос слишком долго.");
+                throw new Error("Тайм-аут: генерация заняла более 10 минут.");
             }
         }
     }
 
-    // Задержка для Pollinations
+    // Задержка только для Pollinations
     if (provider !== 'google') {
         await new Promise(resolve => setTimeout(resolve, 1500));
     }
