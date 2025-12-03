@@ -1,6 +1,6 @@
 // services/geminiService.ts
 
-// 1. АНАЛИЗ ТЕКСТА
+// 1. АНАЛИЗ ТЕКСТА (Оставляем как есть)
 export const analyzePrompt = async (promptText: string) => {
   try {
     const response = await fetch('/api/openrouter', {
@@ -68,10 +68,10 @@ export const generateNanoBananaImage = async (
         imageUrl = `https://image.pollinations.ai/prompt/${hqPrompt}?seed=${seed}&width=${w}&height=${h}&nologo=true&model=flux-realism&enhance=true`;
     }
 
-    // --- GOOGLE (GeminiGen) ---
+    // --- GOOGLE (Gemini 2.0 Flash - Native) ---
     else if (provider === 'google') {
-        // 1. Запуск
-        const startResponse = await fetch('/api/googleImage', {
+        // Просто отправляем запрос и ждем ответ (он быстрый, ~5-10 сек)
+        const response = await fetch('/api/googleImage', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
@@ -81,47 +81,22 @@ export const generateNanoBananaImage = async (
             }),
         });
 
-        if (!startResponse.ok) {
-            const err = await startResponse.text();
-            throw new Error(`Ошибка запуска: ${err}`);
+        if (!response.ok) {
+            // Пытаемся достать текст ошибки из JSON
+            let errorMsg = response.statusText;
+            try {
+                const errData = await response.json();
+                if (errData.error) errorMsg = errData.error;
+            } catch (e) {}
+            throw new Error(`Ошибка Google API: ${errorMsg}`);
         }
 
-        const startData = await startResponse.json();
-
-        if (startData.status === 'completed' && startData.url) {
-            imageUrl = startData.url;
-        } 
-        else if (startData.status === 'queued' && startData.uuid) {
-            const uuid = startData.uuid;
-            let attempts = 0;
-            
-            // === ИЗМЕНЕНИЕ ЗДЕСЬ: ЖДЕМ ДО 10 МИНУТ ===
-            // 300 попыток * 2 секунды = 600 секунд (10 минут)
-            const maxAttempts = 600; 
-
-            while (attempts < maxAttempts) {
-                await new Promise(r => setTimeout(r, 2000));
-                
-                const statusRes = await fetch(`/api/checkGeminiStatus?uuid=${uuid}`);
-                const statusData = await statusRes.json();
-
-                console.log(`Polling (${attempts}/${maxAttempts}):`, statusData.status);
-
-                if (statusData.status === 'completed' && statusData.url) {
-                    imageUrl = statusData.url;
-                    break; 
-                }
-
-                if (statusData.status === 'failed') {
-                    throw new Error(`Ошибка GeminiGen: ${statusData.error}`);
-                }
-
-                attempts++;
-            }
-
-            if (!imageUrl) {
-                throw new Error("Тайм-аут: генерация заняла более 10 минут.");
-            }
+        const data = await response.json();
+        
+        if (data.url) {
+            imageUrl = data.url;
+        } else {
+            throw new Error("Неизвестная ошибка: нет ссылки в ответе");
         }
     }
 
