@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { PromptData, GenderVariant, VALID_CATEGORIES, PromptVariants } from '../types';
 import { X, Save, Upload, Image as ImageIcon, Trash2, Languages } from 'lucide-react';
+import { getProxyImageUrl } from '../services/yandexDiskService';
 
 interface EditPromptModalProps {
   isOpen: boolean;
@@ -24,7 +25,11 @@ const EditPromptModal: React.FC<EditPromptModalProps> = ({ isOpen, onClose, onSa
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setFormData(prev => ({ ...prev, imageBase64: reader.result as string }));
+        setFormData(prev => ({ 
+            ...prev, 
+            imageBase64: reader.result as string,
+            imagePath: null // Сбрасываем старый путь, так как загрузили новое
+        }));
       };
       reader.readAsDataURL(file);
     }
@@ -53,6 +58,11 @@ const EditPromptModal: React.FC<EditPromptModalProps> = ({ isOpen, onClose, onSa
     // Если есть новое поле (maleEn) - берем его. Если нет - берем старое (male).
     return (formData.variants[key] || formData.variants[oldKey] || '') as string;
   };
+
+  // Определяем, какую картинку показывать: загруженную сейчас (base64) или с сервера (proxy)
+  const displayImage = formData.imageBase64 
+    ? formData.imageBase64 
+    : (formData.imagePath ? getProxyImageUrl(formData.imagePath) : null);
 
   return (
     <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
@@ -123,11 +133,11 @@ const EditPromptModal: React.FC<EditPromptModalProps> = ({ isOpen, onClose, onSa
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-2">Изображение / Референс</label>
             <div className="flex items-start gap-4">
-              {formData.imageBase64 ? (
+              {displayImage ? (
                 <div className="relative group w-32 h-32 rounded-lg overflow-hidden border border-slate-700 bg-black">
-                  <img src={formData.imageBase64} alt="Preview" className="w-full h-full object-cover" />
+                  <img src={displayImage} alt="Preview" className="w-full h-full object-cover" />
                   <button 
-                    onClick={() => setFormData({...formData, imageBase64: null})}
+                    onClick={() => setFormData({...formData, imageBase64: null, imagePath: null})}
                     className="absolute top-1 right-1 bg-red-500/80 p-1.5 rounded-full text-white hover:bg-red-600 transition-colors"
                     title="Удалить фото"
                   >
@@ -144,7 +154,7 @@ const EditPromptModal: React.FC<EditPromptModalProps> = ({ isOpen, onClose, onSa
               <div className="flex-grow">
                 <label className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-lg cursor-pointer transition-colors text-sm text-slate-300">
                   <Upload size={16} />
-                  <span>{formData.imageBase64 ? "Заменить фото" : "Загрузить фото"}</span>
+                  <span>{displayImage ? "Заменить фото" : "Загрузить фото"}</span>
                   <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
                 </label>
                 <p className="text-xs text-slate-500 mt-2">
