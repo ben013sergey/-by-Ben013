@@ -498,6 +498,9 @@ function App() {
       return acc;
   }, {} as Record<string, number>);
 
+  // ПОДСЧЕТ АКТИВНЫХ ИЗБРАННЫХ (ТОЛЬКО ТЕ, ЧТО ЕСТЬ В БАЗЕ)
+  const activeFavoritesCount = prompts.filter(p => favorites.includes(p.id)).length;
+
   // ПОДСЧЕТ КОЛИЧЕСТВА ДЛЯ АВТОРОВ
   const authorCounts = prompts.reduce((acc, p) => {
       const author = p.createdBy || 'Неизвестно';
@@ -640,7 +643,7 @@ function App() {
              <div className="flex gap-2 w-full overflow-x-auto no-scrollbar">
                <select value={selectedCategoryFilter} onChange={(e) => setSelectedCategoryFilter(e.target.value)} className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-sm text-slate-300 flex-grow min-w-[140px]">
                  <option value="all">Все категории ({prompts.length})</option>
-                 <option value="favorites">❤️ Избранное ({favorites.length})</option>
+                 <option value="favorites">❤️ Избранное ({activeFavoritesCount})</option>
                  {allCategories.map(c => (
                     <option key={c} value={c}>{c} ({categoryCounts[c] || 0})</option>
                  ))}
