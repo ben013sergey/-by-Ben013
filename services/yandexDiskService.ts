@@ -18,9 +18,10 @@ export const uploadImageToYandex = async (file: File): Promise<string> => {
 };
 
 // 2. Генерация ссылки для отображения (ИСПОЛЬЗУЕМ ПРОКСИ)
-export const getProxyImageUrl = (path: string): string => {
-    // Просто возвращаем ссылку на наш прокси
-    return `/api/proxy?path=${encodeURIComponent(path)}`;
+export const getProxyImageUrl = (path: string | null): string => {
+  if (!path) return '';
+  // Добавляем &v=fix1, чтобы сбросить старый кэш Vercel и браузера
+  return `/api/proxy?path=${encodeURIComponent(path)}&v=fix1`;
 };
 
 // 3. Удаление картинки
@@ -123,3 +124,4 @@ export const saveFavoritesFile = async (favs: string[]) => {
     console.error("Error saving admin favorites:", error);
   }
 };
+
