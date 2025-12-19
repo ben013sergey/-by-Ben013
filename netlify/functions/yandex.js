@@ -1,111 +1,93 @@
 export default async (req, context) => {
-  const TOKEN = process.env.YANDEX_DISK_TOKEN;
-  const FOLDER_PATH = "disk:/Apps/PromptVault/db"; // Проверь свой путь, если менял
-  const DB_FILE_NAME = "prompts_v2.json";
-  
-  // CORS заголовки
+  // CORS заголовки (разрешаем запросы с любого сайта)
   const headers = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     "Content-Type": "application/json"
   };
 
+  // Если это пре-запрос браузера (OPTIONS), отвечаем сразу "ОК"
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers });
   }
 
+  const TOKEN = process.env.YANDEX_DISK_TOKEN;
+  if (!TOKEN) {
+    return new Response(JSON.stringify({ error: "Нет токена (Netlify Env)" }), { status: 500, headers });
+  }
+
   try {
-    // --- GET: Загрузка базы ---
-    if (req.method === "GET") {
-        const url = new URL(req.url);
-        // Если передан параметр filename, грузим его, иначе стандартную базу
-        const fileNameParam = url.searchParams.get('filename');
-        const targetFile = fileNameParam || DB_FILE_NAME;
+    // --- 1. ЗАГРУЗКА (POST) ---
+    // Получаем URL для загрузки файла (сам файл грузит фронтенд)
+    if (req.method === 'POST') {
+      const body = await req.json(); // В Netlify так получаем body
+      const { filename, type } = body; 
+      
+      let targetPath = "/database_prompts.json"; 
 
-        const downloadUrlRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/download?path=${encodeURIComponent(`${FOLDER_PATH}/${targetFile}`)}`, {
-            headers: { 'Authorization': `OAuth ${TOKEN}` }
-        });
+      // Логика путей точь-в-точь как у тебя на Vercel
+      if (type === 'image' && filename) {
+        targetPath = `/pv_images/${filename}`;
+      } else if (filename) {
+        targetPath = `/${filename}`;
+      }
 
-        if (downloadUrlRes.status === 404) {
-            // Файла нет - возвращаем пустой массив
-            return new Response(JSON.stringify([]), { status: 200, headers });
-        }
-
-        const downloadData = await downloadUrlRes.json();
-        const fileRes = await fetch(downloadData.href);
-        const jsonData = await fileRes.json();
-
-        return new Response(JSON.stringify(jsonData), { status: 200, headers });
+      // Запрашиваем у Яндекса ссылку для загрузки
+      const resp = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/upload?path=${encodeURIComponent(targetPath)}&overwrite=true`, {
+        headers: { 'Authorization': `OAuth ${TOKEN}` }
+      });
+      const data = await resp.json();
+      
+      return new Response(JSON.stringify(data), { status: 200, headers });
     }
 
-    // --- POST: Сохранение или Загрузка картинки ---
-    if (req.method === "POST") {
-        const contentType = req.headers.get("content-type") || "";
-
-        // 1. Загрузка картинки (FormData)
-        if (contentType.includes("multipart/form-data")) {
-            const formData = await req.formData();
-            const file = formData.get("file");
-            
-            if (!file) return new Response("No file", { status: 400, headers });
-
-            // Получаем URL для загрузки
-            const uploadUrlRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/upload?path=${encodeURIComponent("/Apps/PromptVault/pv_images/" + file.name)}&overwrite=true`, {
-                headers: { 'Authorization': `OAuth ${TOKEN}` }
-            });
-            const uploadData = await uploadUrlRes.json();
-
-            // Загружаем байты
-            await fetch(uploadData.href, {
-                method: 'PUT',
-                body: file
-            });
-
-            return new Response(JSON.stringify({ path: "/Apps/PromptVault/pv_images/" + file.name }), { status: 200, headers });
-        }
-
-        // 2. Сохранение JSON (обычный POST)
-        const body = await req.json();
-        
-        // Определяем имя файла (основная база или предложка)
-        const targetFileName = body.fileName || DB_FILE_NAME;
-        const dataToSave = body.data || body; // Если структура {fileName, data} или просто массив
-
-        // Получаем URL для загрузки (перезаписи) файла
-        const uploadUrlRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/upload?path=${encodeURIComponent(`${FOLDER_PATH}/${targetFileName}`)}&overwrite=true`, {
-             headers: { 'Authorization': `OAuth ${TOKEN}` }
-        });
-        const uploadData = await uploadUrlRes.json();
-
-        // Отправляем JSON
-        await fetch(uploadData.href, {
-            method: 'PUT',
-            body: JSON.stringify(dataToSave)
-        });
-
-        return new Response(JSON.stringify({ success: true }), { status: 200, headers });
-    }
-
-    // --- DELETE: Удаление картинки ---
-    if (req.method === "DELETE") {
+    // --- 2. УДАЛЕНИЕ (DELETE) ---
+    if (req.method === 'DELETE') {
         const url = new URL(req.url);
-        const pathToDelete = url.searchParams.get('path');
-        
-        if (!pathToDelete) return new Response("No path", { status: 400, headers });
+        const path = url.searchParams.get('path'); // В Netlify так получаем query params
 
-        await fetch(`https://cloud-api.yandex.net/v1/disk/resources?path=${encodeURIComponent(pathToDelete)}&permanently=true`, {
+        if (!path) return new Response(JSON.stringify({error: "No path"}), { status: 400, headers });
+
+        const resp = await fetch(`https://cloud-api.yandex.net/v1/disk/resources?path=${encodeURIComponent(path)}&permanently=true`, {
             method: 'DELETE',
             headers: { 'Authorization': `OAuth ${TOKEN}` }
         });
-
-        return new Response(JSON.stringify({ success: true }), { status: 200, headers });
+        
+        if (resp.status === 204 || resp.status === 202) {
+            return new Response(JSON.stringify({ success: true }), { status: 200, headers });
+        } else {
+            const err = await resp.json();
+            return new Response(JSON.stringify(err), { status: resp.status, headers });
+        }
     }
 
-  } catch (e) {
-    console.error(e);
-    return new Response(JSON.stringify({ error: e.toString() }), { status: 500, headers });
-  }
+    // --- 3. ПОЛУЧЕНИЕ (GET) ---
+    // Скачиваем базу промптов
+    if (req.method === 'GET') {
+      const FILE_PATH = "/database_prompts.json";
+      
+      // 1. Получаем ссылку
+      const linkRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/download?path=${encodeURIComponent(FILE_PATH)}`, {
+        headers: { 'Authorization': `OAuth ${TOKEN}` }
+      });
+      const linkData = await linkRes.json();
 
-  return new Response("Method not allowed", { status: 405, headers });
+      if (linkData.error === "DiskNotFoundError") {
+        return new Response(JSON.stringify({ error: "Файл еще не создан" }), { status: 404, headers });
+      }
+
+      // 2. Скачиваем сам JSON
+      const fileRes = await fetch(linkData.href);
+      const fileJson = await fileRes.json();
+      
+      return new Response(JSON.stringify(fileJson), { status: 200, headers });
+    }
+
+    return new Response("Method not allowed", { status: 405, headers });
+
+  } catch (error) {
+    console.error(error);
+    return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), { status: 500, headers });
+  }
 };
