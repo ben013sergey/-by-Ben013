@@ -1,8 +1,10 @@
 export default async (req, context) => {
-  const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-  const CHANNEL_ID = "@ben013_promt_gallery";
+  // ИСПОЛЬЗУЕМ ТВОИ НАЗВАНИЯ ИЗ СКРИНШОТА
+  const BOT_TOKEN = process.env.TG_BOT_TOKEN; 
+  
+  // Если переменная канала есть в настройках - берем её, иначе используем дефолтную
+  const CHANNEL_ID = process.env.TG_CHANNEL_ID || "@ben013_promt_gallery";
 
-  // CORS
   const headers = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type",
@@ -22,13 +24,14 @@ export default async (req, context) => {
       const { userId } = body;
 
       if (!userId) return new Response(JSON.stringify({ isSubscribed: false }), { status: 400, headers });
+      if (!BOT_TOKEN) return new Response(JSON.stringify({ error: "No Bot Token" }), { status: 500, headers });
 
       const url = `https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=${CHANNEL_ID}&user_id=${userId}`;
       const tgRes = await fetch(url);
       const data = await tgRes.json();
 
       if (!data.ok) {
-          // Если ошибка (например, юзер не найден или бот не админ), считаем что не подписан
+          console.log("TG Error:", data); // Логирование ошибки для отладки
           return new Response(JSON.stringify({ isSubscribed: false }), { status: 200, headers });
       }
 
