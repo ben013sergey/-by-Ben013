@@ -9,20 +9,26 @@ export default async function handler(req, res) {
   if (!TOKEN) return res.status(500).json({ error: "Нет токена" });
 
   try {
-    // --- 1. ЗАГРУЗКА (POST) ---
+    // --- 1. ЗАГРУЗКА (POST) - Получение ссылки для upload ---
     if (req.method === 'POST') {
       const { filename, type } = req.body; 
+      
+      // По умолчанию сохраняем в базу
       let targetPath = "/database_prompts.json"; 
 
       if (type === 'image' && filename) {
+        // Логика для картинок (не меняем)
         targetPath = `/pv_images/${filename}`;
       } else if (filename) {
-        targetPath = `/${filename}`; // Кастомное имя для базы пользователя
+        // Логика для настроек и избранного (settings.json, admin_favorites.json)
+        targetPath = `/${filename}`; 
       }
 
+      // Запрашиваем URL для загрузки
       const resp = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/upload?path=${targetPath}&overwrite=true`, {
         headers: { 'Authorization': `OAuth ${TOKEN}` }
       });
+      
       const data = await resp.json();
       return res.status(200).json(data);
     }
@@ -47,18 +53,33 @@ export default async function handler(req, res) {
 
     // --- 3. ПОЛУЧЕНИЕ (GET) ---
     if (req.method === 'GET') {
-      const FILE_PATH = "/database_prompts.json";
-      const linkRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/download?path=${FILE_PATH}`, {
+      // Считываем имя файла из параметров запроса
+      const requestedFile = req.query.filename;
+      
+      // По умолчанию (если ничего не передали) - старая база, чтобы не сломать App.tsx
+      let filePath = "/database_prompts.json";
+
+      // Если запросили конкретный файл (например, settings.json)
+      if (requestedFile) {
+          filePath = `/${requestedFile}`;
+      }
+
+      // 1. Получаем ссылку на скачивание
+      const linkRes = await fetch(`https://cloud-api.yandex.net/v1/disk/resources/download?path=${filePath}`, {
         headers: { 'Authorization': `OAuth ${TOKEN}` }
       });
       const linkData = await linkRes.json();
 
-      if (linkData.error === "DiskNotFoundError") {
-        return res.status(404).json({ error: "Файл еще не создан" });
+      // Если файла нет (например, настройки еще не созданы) - возвращаем 404
+      if (linkRes.status === 404 || linkData.error === "DiskNotFoundError") {
+        return res.status(404).json({ error: "Файл не найден" });
       }
 
+      // 2. Скачиваем сам файл и отдаем его содержимое фронтенду
+      // Это позволяет фронтенду просто делать await res.json()
       const fileRes = await fetch(linkData.href);
       const fileJson = await fileRes.json();
+      
       return res.status(200).json(fileJson);
     }
 
