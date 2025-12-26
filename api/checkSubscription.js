@@ -10,9 +10,10 @@ export default async function handler(req, res) {
   const CHANNEL_ID = process.env.TG_CHANNEL_ID;
   const YANDEX_DISK_TOKEN = process.env.YANDEX_DISK_TOKEN;
 
-  // 1. ПРОВЕРКА ГЛОБАЛЬНЫХ НАСТРОЕК (settings.json)
+  // 1. ПРОВЕРКА ГЛОБАЛЬНЫХ НАСТРОЕК (settings.json в корне)
   try {
-    const settingsResponse = await fetch('https://cloud-api.yandex.net/v1/disk/resources/download?path=app_data/settings.json', {
+    // Обращаемся к Яндекс Диску напрямую за файлом settings.json
+    const settingsResponse = await fetch('https://cloud-api.yandex.net/v1/disk/resources/download?path=settings.json', {
       headers: { Authorization: `OAuth ${YANDEX_DISK_TOKEN}` }
     });
 
@@ -21,15 +22,15 @@ export default async function handler(req, res) {
       const fileResponse = await fetch(linkData.href);
       const settings = await fileResponse.json();
 
-      // ЕСЛИ ВКЛЮЧЕН ПУБЛИЧНЫЙ ДОСТУП - ПУСКАЕМ ВСЕХ (у кого есть userId)
+      // ЕСЛИ ВКЛЮЧЕН ПУБЛИЧНЫЙ ДОСТУП - ПУСКАЕМ ВСЕХ (у кого есть userId или даже без него, если это веб)
       if (settings && settings.isPublicAccess === true) {
-         if (!userId) return res.status(400).json({ error: "No userId" });
+         // Возвращаем успех и статус подписки true
          return res.status(200).json({ isSubscribed: true });
       }
     }
   } catch (e) {
-    console.error("Settings check failed, falling back to strict mode", e);
-    // Если ошибка чтения настроек -> продолжаем стандартную проверку
+    // Если файла нет или ошибка — не страшно, идем к стандартной проверке
+    console.log("Settings check skipped or failed (normal if file doesn't exist yet)");
   }
 
   // 2. СТАНДАРТНАЯ ПРОВЕРКА ПОДПИСКИ
