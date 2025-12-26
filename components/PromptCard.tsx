@@ -23,15 +23,20 @@ interface PromptCardProps {
   isAdmin: boolean;
   isFavorite: boolean;
   onToggleFavorite: (id: string) => void;
+  // Новые пропсы
+  isReadOnly?: boolean; 
 }
 
-const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCategoryUpdate, onEdit, onUsageUpdate, onAddHistory, isAdmin, isFavorite, onToggleFavorite }) => {
+const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCategoryUpdate, onEdit, onUsageUpdate, onAddHistory, isAdmin, isFavorite, onToggleFavorite, isReadOnly = false }) => {
   const [activeVariant, setActiveVariant] = useState<GenderVariant>(GenderVariant.Female);
   const [showRussian, setShowRussian] = useState(false);
   const [copied, setCopied] = useState(false);
   const [activeModalImage, setActiveModalImage] = useState<string | null>(null);
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [isImageLoaded, setIsImageLoaded] = useState(false);
+  
+  // Локальный счетчик для мгновенного обновления UI
+  const [localUsageCount, setLocalUsageCount] = useState(data.usageCount || 0);
 
   const finalImageSrc = data.imagePath 
     ? getProxyImageUrl(data.imagePath) 
@@ -56,9 +61,9 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const [rotateX, setRotateX] = useState(0);
   const [rotateY, setRotateY] = useState(0);
 
-  const canEdit = isAdmin || !data.isSystem;
+  const canEdit = isAdmin || (!data.isSystem && !isReadOnly);
+  const canGenerate = isAdmin || !isReadOnly; // Генерировать могут все, если не ReadOnly (или если Админ)
 
-  // --- HAPTIC FEEDBACK ---
   const triggerHaptic = (style: 'light' | 'medium' | 'heavy' | 'rigid' | 'soft' = 'medium') => {
     // @ts-ignore
     if (window.Telegram?.WebApp?.HapticFeedback) {
@@ -75,7 +80,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     }
   };
 
-  // --- ГИРОСКОП ---
   useEffect(() => {
     const handleOrientation = (e: DeviceOrientationEvent) => {
         if (isHovered) return;
@@ -127,6 +131,10 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
     navigator.clipboard.writeText(getCurrentText() || "");
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+    
+    // Увеличиваем счетчик и сохраняем
+    setLocalUsageCount(prev => prev + 1);
+    onUsageUpdate(data.id);
   };
 
   const formatDate = (timestamp: number) => {
@@ -240,7 +248,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
   const handleWheel = (e: React.WheelEvent) => { if (e.ctrlKey || activeModalImage) { if (e.deltaY < 0) setZoomLevel(prev => Math.min(prev + 0.1, 5)); else setZoomLevel(prev => Math.max(prev - 0.1, 0.5)); }};
   const aspectRatioOptions: AspectRatio[] = ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9'];
 
-  // ИЗМЕНЕНИЕ В КНОПКЕ ИЗБРАННОГО НИЖЕ (whitespace-nowrap + текст "Избранное")
   return (
     <>
       <div 
@@ -268,7 +275,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
               ) : (<div className="w-full h-full flex flex-col items-center justify-center text-slate-500"><ImageIcon size={32} /><span className="text-xs mt-2">Нет фото</span></div>)}
             </div>
             
-            {/* КНОПКА ИЗБРАННОГО: ФИКС */}
             <div className="flex items-center justify-between w-full mt-3 gap-3">
                 <button 
                     onClick={(e) => { e.stopPropagation(); triggerHaptic('medium'); onToggleFavorite(data.id); }}
@@ -288,7 +294,6 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
           </div>
 
           <div className="flex-grow flex flex-col min-w-0">
-             {/* Остальная часть без изменений */}
              <div className="flex justify-between items-start mb-3">
               <div className="flex flex-col relative flex-grow mr-4 min-w-0">
                 <div className="group relative inline-flex items-center gap-1 mb-1 cursor-pointer" onClick={() => canEdit && setShowCategoryDropdown(!showCategoryDropdown)}>
@@ -314,35 +319,48 @@ const PromptCard: React.FC<PromptCardProps> = ({ data, index, onDelete, onCatego
                 <p className="text-sm text-slate-300 font-mono leading-relaxed break-words whitespace-pre-wrap flex-grow h-full max-h-[300px] overflow-y-auto">{getCurrentText()}</p>
                 <div className="flex justify-end gap-2 mt-2">
                   <button onClick={() => { triggerHaptic('light'); setShowRussian(!showRussian); }} className={`p-2 rounded-md transition-all text-xs flex items-center gap-1 ${showRussian ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-blue-400'}`}><Languages size={14} /><span>{showRussian ? 'RU' : 'EN'}</span></button>
-                  <button onClick={handleCopy} className="p-2 rounded-md bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-all border border-slate-600 flex items-center gap-2 text-xs">{copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}<span>{copied ? 'Copied' : 'Copy'}</span></button>
+                  <button onClick={handleCopy} className="p-2 rounded-md bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-all border border-slate-600 flex items-center gap-2 text-xs">
+                    {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+                    <span className="font-bold">{localUsageCount > 0 ? localUsageCount : 'Copy'}</span>
+                  </button>
                 </div>
               </div>
-              <div className="p-3 bg-slate-900/80 flex flex-col gap-3">
-                 <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Тест (Генерация)</div>
-                 <div className="relative group/upload h-24">
-                   {testReferenceImage ? (
-                     <div className="relative w-full h-full rounded-lg overflow-hidden border border-slate-600 bg-black/50"><img src={testReferenceImage} className="w-full h-full object-cover opacity-80" alt="ref" /><button onClick={() => setTestReferenceImage(null)} className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-1 hover:bg-red-500/80"><X size={12} /></button></div>
-                   ) : (<label className="w-full h-full border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-colors"><Upload size={16} className="text-slate-500 mb-1" /><span className="text-[10px] text-slate-400">Фото (опц)</span><input type="file" accept="image/*" className="hidden" onChange={handleRefUpload} /></label>)}
-                 </div>
-                 <button onClick={handleTestGeneration} disabled={isGenerating} className={`w-full h-10 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${isGenerating ? 'bg-slate-700 text-slate-400' : genModel === 'google' ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg'}`}>{genModel === 'google' ? <ExternalLink size={16} /> : isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} fill="currentColor" />} {genModel === 'google' ? 'Открыть Gemini' : isGenerating ? 'Wait...' : 'Генерировать'}</button>
-                 <div className="flex gap-2 h-8 w-full">
-                    <div className="relative flex-1">
-                      <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value as AspectRatio)} className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-[10px] text-slate-300 outline-none appearance-none">{aspectRatioOptions.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}</select>
-                      <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"><Scaling size={12} /></div>
-                    </div>
-                    <div className="relative flex-1">
-                      <select value={genModel} onChange={(e) => setGenModel(e.target.value as ModelProvider)} className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-[10px] text-slate-300 outline-none appearance-none">
-                        <option value="pollinations">Fast (Free)</option>
-                        <option value="huggingface">HQ (Flux)</option>
-                        {isAdmin && <option value="google">Nano Banana (Pro)</option>}
-                      </select>
-                      <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"><Aperture size={12} /></div>
-                    </div>
-                 </div>
-                 {adminCopiedInfo && <div className="mt-2 text-[10px] text-amber-300 bg-amber-500/10 p-2 rounded border border-amber-500/20 animate-in fade-in slide-in-from-top-2">{adminCopiedInfo}</div>}
-                 {generatedImage && !isGenerating && (<div className="mt-2 animate-in fade-in zoom-in duration-300"><div className="relative w-full h-40 rounded-lg overflow-hidden border border-emerald-500/50 shadow-lg cursor-pointer" onClick={() => setActiveModalImage(generatedImage)}><img src={generatedImage} className="w-full h-full object-cover" alt="Generated" /></div></div>)}
-                 {genError && <div className="mt-2 text-xs text-red-400 bg-red-500/10 p-2 rounded border border-red-500/20">{genError}</div>}
-              </div>
+              
+              {/* Скрываем блок генерации, если ReadOnly и не Админ */}
+              {canGenerate ? (
+                <div className="p-3 bg-slate-900/80 flex flex-col gap-3">
+                   <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Тест (Генерация)</div>
+                   <div className="relative group/upload h-24">
+                     {testReferenceImage ? (
+                       <div className="relative w-full h-full rounded-lg overflow-hidden border border-slate-600 bg-black/50"><img src={testReferenceImage} className="w-full h-full object-cover opacity-80" alt="ref" /><button onClick={() => setTestReferenceImage(null)} className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-1 hover:bg-red-500/80"><X size={12} /></button></div>
+                     ) : (<label className="w-full h-full border-2 border-dashed border-slate-700 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-indigo-500/50 hover:bg-indigo-500/5 transition-colors"><Upload size={16} className="text-slate-500 mb-1" /><span className="text-[10px] text-slate-400">Фото (опц)</span><input type="file" accept="image/*" className="hidden" onChange={handleRefUpload} /></label>)}
+                   </div>
+                   <button onClick={handleTestGeneration} disabled={isGenerating} className={`w-full h-10 rounded-lg text-xs font-bold flex items-center justify-center gap-2 transition-all ${isGenerating ? 'bg-slate-700 text-slate-400' : genModel === 'google' ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg'}`}>{genModel === 'google' ? <ExternalLink size={16} /> : isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} fill="currentColor" />} {genModel === 'google' ? 'Открыть Gemini' : isGenerating ? 'Wait...' : 'Генерировать'}</button>
+                   <div className="flex gap-2 h-8 w-full">
+                      <div className="relative flex-1">
+                        <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value as AspectRatio)} className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-[10px] text-slate-300 outline-none appearance-none">{aspectRatioOptions.map(ratio => <option key={ratio} value={ratio}>{ratio}</option>)}</select>
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"><Scaling size={12} /></div>
+                      </div>
+                      <div className="relative flex-1">
+                        <select value={genModel} onChange={(e) => setGenModel(e.target.value as ModelProvider)} className="w-full h-full bg-slate-800 border border-slate-600 rounded-lg pl-2 pr-1 text-[10px] text-slate-300 outline-none appearance-none">
+                          <option value="pollinations">Fast (Free)</option>
+                          <option value="huggingface">HQ (Flux)</option>
+                          {isAdmin && <option value="google">Nano Banana (Pro)</option>}
+                        </select>
+                        <div className="absolute right-1 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500"><Aperture size={12} /></div>
+                      </div>
+                   </div>
+                   {adminCopiedInfo && <div className="mt-2 text-[10px] text-amber-300 bg-amber-500/10 p-2 rounded border border-amber-500/20 animate-in fade-in slide-in-from-top-2">{adminCopiedInfo}</div>}
+                   {generatedImage && !isGenerating && (<div className="mt-2 animate-in fade-in zoom-in duration-300"><div className="relative w-full h-40 rounded-lg overflow-hidden border border-emerald-500/50 shadow-lg cursor-pointer" onClick={() => setActiveModalImage(generatedImage)}><img src={generatedImage} className="w-full h-full object-cover" alt="Generated" /></div></div>)}
+                   {genError && <div className="mt-2 text-xs text-red-400 bg-red-500/10 p-2 rounded border border-red-500/20">{genError}</div>}
+                </div>
+              ) : (
+                // Заглушка, если генерация отключена
+                <div className="p-3 bg-slate-900/80 flex flex-col items-center justify-center text-center">
+                    <Lock className="text-slate-600 mb-2" size={24} />
+                    <span className="text-[10px] text-slate-500">Генерация доступна<br/>только администраторам</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
