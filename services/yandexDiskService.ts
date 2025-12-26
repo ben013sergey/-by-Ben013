@@ -48,14 +48,14 @@ export const notifyAdminNewPrompts = async (username: string, filename: string, 
     }
 };
 
-// 5. Сохранение Базы
+// 5. УНИВЕРСАЛЬНОЕ СОХРАНЕНИЕ (База, Настройки, Избранное)
 export const saveToYandexDisk = async (data: any, customFilename?: string) => {
   try {
     const body = customFilename 
       ? JSON.stringify({ filename: customFilename }) 
       : JSON.stringify({}); 
 
-    // 1. Получаем ссылку
+    // 1. Получаем ссылку на загрузку от нашего API
     const linkResponse = await fetch('/api/yandex', { 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -65,70 +65,55 @@ export const saveToYandexDisk = async (data: any, customFilename?: string) => {
     const linkData = await linkResponse.json();
     if (!linkData.href) throw new Error("Не удалось получить ссылку");
 
-    // 2. Формируем JSON и грузим
+    // 2. Формируем JSON и грузим напрямую в Яндекс
     const jsonString = JSON.stringify(data, null, 2);
     const blob = new Blob([jsonString], { type: 'application/json' });
 
     const uploadResponse = await fetch(linkData.href, { method: 'PUT', body: blob });
-    if (!uploadResponse.ok) throw new Error("Ошибка загрузки JSON");
+    if (!uploadResponse.ok) throw new Error("Ошибка загрузки JSON в Яндекс");
 
     return true;
   } catch (error) {
-    console.error(error);
+    console.error("Save error:", error);
     throw error;
   }
 };
 
-// Загрузка Базы
-export const loadFromYandexDisk = async () => {
-  try {
-    const response = await fetch('/api/yandex', { method: 'GET' });
+// 6. УНИВЕРСАЛЬНАЯ ЗАГРУЗКА
+const fetchJsonFromYandex = async (filename?: string) => {
+    let url = '/api/yandex';
+    if (filename) url += `?filename=${filename}`;
+
+    const response = await fetch(url, { method: 'GET' });
+    
+    // Если файла нет (404) - это нормально для первого запуска
     if (response.status === 404) return null;
-    if (!response.ok) throw new Error("Ошибка загрузки");
+    if (!response.ok) throw new Error("Ошибка API Яндекс при чтении");
+
+    // Наш обновленный API (Шаг 1) теперь сам скачивает файл и отдает JSON
     return await response.json();
-  } catch (error) {
-    console.error(error);
-    throw error;
-  }
 };
 
-// --- FAVORITES (ИЗБРАННОЕ) ---
+// --- СПЕЦИФИЧЕСКИЕ МЕТОДЫ (Обертки) ---
 
+// Основная база промптов
+export const loadFromYandexDisk = async () => {
+  return await fetchJsonFromYandex(); 
+};
+
+// Избранное админа
 export const loadFavoritesFile = async (): Promise<string[] | null> => {
   try {
-    const response = await fetch(`/api/yandex?filename=admin_favorites.json`, {
-      method: 'GET',
-    });
-
-    if (response.status === 404) return []; 
-    if (!response.ok) throw new Error('Ошибка загрузки избранного');
-
-    const data = await response.json();
+    const data = await fetchJsonFromYandex('admin_favorites.json');
     return Array.isArray(data) ? data : [];
   } catch (error) {
-    console.error("Error loading admin favorites:", error);
-    return null;
+    console.error("Error loading favs:", error);
+    return [];
   }
 };
 
 export const saveFavoritesFile = async (favs: string[]) => {
-  // Используем логику saveToYandexDisk для надежности
-  const jsonString = JSON.stringify(favs, null, 2);
-  const blob = new Blob([jsonString], { type: 'application/json' });
-
-  try {
-      const linkResponse = await fetch('/api/yandex', { 
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: 'admin_favorites.json' })
-      });
-      const linkData = await linkResponse.json();
-      if (linkData.href) {
-          await fetch(linkData.href, { method: 'PUT', body: blob });
-      }
-  } catch (error) {
-    console.error("Error saving admin favorites:", error);
-  }
+  return await saveToYandexDisk(favs, 'admin_favorites.json');
 };
 
 // --- GLOBAL SETTINGS (НАСТРОЙКИ АДМИНА) ---
@@ -140,16 +125,9 @@ export interface GlobalSettings {
 
 export const loadSettingsFile = async (): Promise<GlobalSettings> => {
   try {
-    // Читаем settings.json из корня
-    const response = await fetch(`/api/yandex?filename=settings.json`, { method: 'GET' });
+    const data = await fetchJsonFromYandex('settings.json');
+    if (!data) return { isReadOnly: false, isPublicAccess: false };
     
-    if (response.status === 404) {
-        return { isReadOnly: false, isPublicAccess: false };
-    }
-    
-    if (!response.ok) throw new Error('Ошибка загрузки настроек');
-    
-    const data = await response.json();
     return {
         isReadOnly: data.isReadOnly ?? false,
         isPublicAccess: data.isPublicAccess ?? false
@@ -161,27 +139,5 @@ export const loadSettingsFile = async (): Promise<GlobalSettings> => {
 };
 
 export const saveSettingsFile = async (settings: GlobalSettings) => {
-  // Используем надежный метод (Get Link -> PUT Blob)
-  const jsonString = JSON.stringify(settings, null, 2);
-  const blob = new Blob([jsonString], { type: 'application/json' });
-
-  try {
-    // 1. Просим ссылку для settings.json
-    const linkResponse = await fetch('/api/yandex', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ filename: 'settings.json' }),
-    });
-
-    const linkData = await linkResponse.json();
-    if (!linkData.href) throw new Error("Не удалось получить ссылку для настроек");
-
-    // 2. Загружаем файл
-    await fetch(linkData.href, { method: 'PUT', body: blob });
-    
-    console.log("Settings saved successfully");
-  } catch (error) {
-    console.error("Error saving settings:", error);
-    throw error;
-  }
+  return await saveToYandexDisk(settings, 'settings.json');
 };
