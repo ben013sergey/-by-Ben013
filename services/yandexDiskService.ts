@@ -125,3 +125,46 @@ export const saveFavoritesFile = async (favs: string[]) => {
   }
 };
 
+// --- GLOBAL SETTINGS (НАСТРОЙКИ АДМИНА) ---
+
+export interface GlobalSettings {
+  isReadOnly: boolean;
+  isPublicAccess: boolean; // Отключить проверку подписки
+}
+
+export const loadSettingsFile = async (): Promise<GlobalSettings> => {
+  try {
+    const response = await fetch(`/api/yandex?filename=settings.json`, { method: 'GET' });
+    if (response.status === 404) return { isReadOnly: false, isPublicAccess: false };
+    if (!response.ok) throw new Error('Ошибка загрузки настроек');
+    const data = await response.json();
+    return {
+        isReadOnly: data.isReadOnly ?? false,
+        isPublicAccess: data.isPublicAccess ?? false
+    };
+  } catch (error) {
+    console.error("Error loading settings:", error);
+    return { isReadOnly: false, isPublicAccess: false };
+  }
+};
+
+export const saveSettingsFile = async (settings: GlobalSettings) => {
+  try {
+    // Используем тот же эндпоинт, что и для favorites, но с другим именем файла
+    // Важно: api/yandex должен уметь принимать параметр 'data' в теле запроса, 
+    // чтобы сразу сохранить JSON, не запрашивая ссылку на upload. 
+    // (В твоей текущей реализации api/yandex для POST запроса с 'data' работает корректно, судя по saveFavoritesFile)
+    await fetch('/api/yandex', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+          filename: 'settings.json', 
+          data: settings 
+      }),
+    });
+  } catch (error) {
+    console.error("Error saving settings:", error);
+    throw error;
+  }
+};
+
