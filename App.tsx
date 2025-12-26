@@ -22,7 +22,10 @@ import {
     notifyAdminNewPrompts,
     getProxyImageUrl,
     loadFavoritesFile,
-    saveFavoritesFile
+    saveFavoritesFile,
+    loadSettingsFile,   // НОВОЕ
+    saveSettingsFile,    // НОВОЕ
+    GlobalSettings      // НОВОЕ
 } from './services/yandexDiskService';
 import { tgStorage } from './services/telegramStorage';
 
@@ -120,6 +123,8 @@ function App() {
   const [hasAccess, setHasAccess] = useState<boolean | null>(null);
 
   const [favorites, setFavorites] = useState<string[]>([]);
+  // НОВОЕ: Стейт для глобальных настроек
+  const [settings, setSettings] = useState<GlobalSettings>({ isReadOnly: false, isPublicAccess: false });
 
   const tgUser = window.Telegram?.WebApp?.initDataUnsafe?.user;
   const userId = tgUser?.id;
@@ -174,6 +179,15 @@ function App() {
       }
   };
 
+  // НОВОЕ: Функция переключения глобальных настроек
+  const toggleSetting = async (key: keyof GlobalSettings) => {
+    if (!isAdmin) return;
+    const newSettings = { ...settings, [key]: !settings[key] };
+    setSettings(newSettings);
+    await saveSettingsFile(newSettings);
+    showToast(`Настройка ${key === 'isReadOnly' ? 'Read Only' : 'Public Access'} изменена!`);
+  };
+
   const [view, setView] = useState<'list' | 'create'>('list');
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
@@ -200,13 +214,14 @@ function App() {
   useEffect(() => {
     const checkSubscription = async () => {
       if (isAdmin) { setHasAccess(true); return; }
-      if (!userId) { setHasAccess(false); return; }
-
+      
+      // Сначала проверим публичный доступ (даже без ID можно попробовать, 
+      // но наш API checkSubscription теперь сам проверяет settings.json)
       try {
         const res = await fetch('/api/checkSubscription', {
            method: 'POST',
            headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({ userId: userId })
+           body: JSON.stringify({ userId: userId || 0 }) // шлем 0 если нет ID, чтобы API просто проверил settings
         });
         
         if (!res.ok) { setHasAccess(false); return; }
@@ -268,6 +283,10 @@ function App() {
     const loadData = async () => {
       setIsDataLoaded(false); 
       try {
+        // НОВОЕ: Загружаем настройки
+        const loadedSettings = await loadSettingsFile();
+        setSettings(loadedSettings);
+
         const cloudData = await loadFromYandexDisk();
         if (cloudData && Array.isArray(cloudData) && cloudData.length > 0) {
           const protectedData = cloudData.map((p: any) => ({ ...p, isSystem: true }));
@@ -415,7 +434,6 @@ function App() {
          catch(e) { console.error(e); showToast("Фото не загрузилось", "error"); }
       } else { base64Preview = uploadedImage; }
 
-      // ЕСЛИ АДМИН - НЕ СОХРАНЯЕМ МЕТКУ АВТОРА
       const authorTag = isAdmin ? undefined : username;
 
       const newEntry: PromptData = {
@@ -442,7 +460,6 @@ function App() {
          catch(e) { showToast("Ошибка загрузки фото", "error"); }
       } else { base64Preview = uploadedImage; }
 
-      // ЕСЛИ АДМИН - НЕ СОХРАНЯЕМ МЕТКУ АВТОРА
       const authorTag = isAdmin ? undefined : username;
 
       const newEntry: PromptData = {
@@ -470,12 +487,10 @@ function App() {
   
   const resetFilters = () => { setSearchQuery(''); setSelectedCategoryFilter('all'); setSelectedAuthorFilter('all'); setSortOrder('newest'); };
 
-  // --- ФИЛЬТРАЦИЯ ---
   const allFilteredPrompts = prompts.filter(p => {
     const s = searchQuery.toLowerCase();
     const matchesSearch = p.shortTitle.toLowerCase().includes(s) || p.originalPrompt.toLowerCase().includes(s);
     
-    // Если выбрано "Избранное"
     if (selectedCategoryFilter === 'favorites') {
         return matchesSearch && favorites.includes(p.id);
     }
@@ -498,10 +513,8 @@ function App() {
       return acc;
   }, {} as Record<string, number>);
 
-  // ПОДСЧЕТ АКТИВНЫХ ИЗБРАННЫХ (ТОЛЬКО ТЕ, ЧТО ЕСТЬ В БАЗЕ)
   const activeFavoritesCount = prompts.filter(p => favorites.includes(p.id)).length;
 
-  // ПОДСЧЕТ КОЛИЧЕСТВА ДЛЯ АВТОРОВ
   const authorCounts = prompts.reduce((acc, p) => {
       const author = p.createdBy || 'Неизвестно';
       acc[author] = (acc[author] || 0) + 1;
@@ -510,14 +523,12 @@ function App() {
 
   const allCategories = Array.from(new Set(prompts.map(p => p.category || 'Без категории'))).sort();
   
-  // ФИЛЬТРАЦИЯ АВТОРОВ (ИСКЛЮЧАЕМ АДМИНА)
   const allAuthors = Object.keys(authorCounts)
         .filter(a => a !== 'Неизвестно' && a.toLowerCase() !== '@ben013sergey' && a !== 'ben013')
         .sort();
 
   const visiblePrompts = allFilteredPrompts.slice(0, visibleCount);
   
-  // Группировка (только если не Избранное)
   const groupedPrompts = visiblePrompts.reduce((acc, p) => { 
       const c = p.category || 'Без категории'; 
       if (!acc[c]) acc[c] = []; 
@@ -532,7 +543,7 @@ function App() {
   if (hasAccess === false) return (<div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-center p-6"><div className="bg-red-500/10 p-6 rounded-2xl border border-red-500/20 max-w-sm"><Lock size={48} className="mx-auto text-red-500 mb-4" /><h2 className="text-2xl font-bold text-white mb-2">Доступ закрыт</h2><a href={CHANNEL_LINK} className="block w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold mt-4">Подписаться</a></div></div>);
   if (!isDataLoaded) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400"><Loader2 className="animate-spin" /></div>;
 
-  // --- ЭКРАН СОЗДАНИЯ (Код без изменений) ---
+  // --- ЭКРАН СОЗДАНИЯ (без изменений) ---
   if (view === 'create') {
     return (
       <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto w-full h-full">
@@ -626,6 +637,14 @@ function App() {
             </div>
             
             <div className="flex items-center gap-2 mt-1">
+                {/* НОВОЕ: Тумблеры настроек для Админа */}
+                {isAdmin && (
+                   <div className="flex gap-2 mr-2">
+                     <button onClick={() => toggleSetting('isReadOnly')} className={`p-2 rounded-lg text-[10px] font-bold transition-colors ${settings.isReadOnly ? 'bg-red-600 text-white' : 'bg-slate-800 text-slate-500'}`} title="Режим только чтения для пользователей">READ<br/>ONLY</button>
+                     <button onClick={() => toggleSetting('isPublicAccess')} className={`p-2 rounded-lg text-[10px] font-bold transition-colors ${settings.isPublicAccess ? 'bg-green-600 text-white' : 'bg-slate-800 text-slate-500'}`} title="Отключить проверку подписки">PUB<br/>ACC</button>
+                   </div>
+                )}
+
                 <button onClick={handleApplyInternalExamples} className="p-2 text-slate-400 bg-slate-800 rounded-lg hover:bg-slate-700 transition-colors" title="Сбросить"><Database size={18} /></button>
                 <button onClick={async () => { if(!confirm("Загрузить базу?")) return; const data = await loadFromYandexDisk(); if(data) { const protectedData = data.map((p: any) => ({ ...p, isSystem: true })); setPrompts(protectedData); showToast("Обновлено!"); } }} className="p-2 text-white bg-blue-500 hover:bg-blue-400 rounded-lg shadow-md transition-colors" title="Загрузить"><CloudDownload size={18} /></button>
                 <button onClick={handleUserSaveToCloud} className={`p-2 text-white rounded-lg shadow-md flex items-center gap-1 transition-colors ${isAdmin ? 'bg-red-600 hover:bg-red-500' : 'bg-yellow-500 hover:bg-yellow-400 text-slate-900'}`} title={isAdmin ? "Перезаписать ОСНОВНУЮ базу" : "Предложить новые"}><Cloud size={18} /></button>
@@ -676,7 +695,7 @@ function App() {
       <main className="max-w-5xl mx-auto px-4 py-6">
         <div className="space-y-8">
           
-          {/* ЕСЛИ ИЗБРАННОЕ - ПРОСТО СПИСОК */}
+          {/* ЕСЛИ ИЗБРАННОЕ */}
           {selectedCategoryFilter === 'favorites' ? (
               <div className="grid gap-4">
                   {allFilteredPrompts.length > 0 ? allFilteredPrompts.map((p, idx) => (
@@ -690,16 +709,17 @@ function App() {
                         onUsageUpdate={handleUsageUpdate} 
                         onAddHistory={handleAddHistory}
                         isAdmin={isAdmin}
-                        // ПЕРЕДАЕМ ДАННЫЕ В КАРТОЧКУ
                         isFavorite={favorites.includes(p.id)}
                         onToggleFavorite={toggleFavorite}
+                        // НОВОЕ: Передаем статус ReadOnly
+                        isReadOnly={settings.isReadOnly}
                       />
                   )) : (
                       <div className="text-center text-slate-500 py-10">В избранном пока пусто</div>
                   )}
               </div>
           ) : (
-              // ОБЫЧНЫЙ РЕЖИМ (ПО КАТЕГОРИЯМ)
+              // ОБЫЧНЫЙ РЕЖИМ
               sortedGroupKeys.map(cat => (
                 <div key={cat}>
                   <h2 className="text-lg font-bold text-white mb-3 border-l-4 border-indigo-500 pl-2">{cat}</h2>
@@ -715,9 +735,10 @@ function App() {
                         onUsageUpdate={handleUsageUpdate} 
                         onAddHistory={handleAddHistory}
                         isAdmin={isAdmin} 
-                        // ПЕРЕДАЕМ ДАННЫЕ В КАРТОЧКУ
                         isFavorite={favorites.includes(p.id)}
                         onToggleFavorite={toggleFavorite}
+                        // НОВОЕ: Передаем статус ReadOnly
+                        isReadOnly={settings.isReadOnly}
                       />
                     ))}
                   </div>
@@ -739,7 +760,11 @@ function App() {
         </div>
       </main>
 
-      <button onClick={handleOpenCreate} className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-2xl shadow-indigo-900/50 hover:scale-110 active:scale-95 transition-all"><Plus size={28} /></button>
+      {/* НОВОЕ: Кнопка создания скрывается, если ReadOnly включен и вы не админ */}
+      {(!settings.isReadOnly || isAdmin) && (
+        <button onClick={handleOpenCreate} className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full flex items-center justify-center shadow-2xl shadow-indigo-900/50 hover:scale-110 active:scale-95 transition-all"><Plus size={28} /></button>
+      )}
+      
       {showScrollTopButton && <button onClick={scrollToTop} className="fixed bottom-24 right-7 z-40 w-10 h-10 bg-slate-700/80 text-white rounded-full flex items-center justify-center shadow-lg backdrop-blur"><ChevronUp size={20} /></button>}
     </div>
   );
