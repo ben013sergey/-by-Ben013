@@ -279,14 +279,18 @@ function App() {
   useEffect(() => { setVisibleCount(ITEMS_PER_PAGE); }, [searchQuery, selectedCategoryFilter, selectedAuthorFilter, sortOrder]);
 
   useEffect(() => {
+    // Эта проверка важна, чтобы не грузить данные до авторизации
     if (hasAccess !== true) return;
+
     const loadData = async () => {
       setIsDataLoaded(false); 
       try {
-        // НОВОЕ: Загружаем настройки
+        // 1. Сначала грузим настройки, чтобы UI сразу стал правильным
         const loadedSettings = await loadSettingsFile();
+        console.log("Loaded Settings:", loadedSettings); // Для отладки в консоли
         setSettings(loadedSettings);
 
+        // 2. Потом базу промптов
         const cloudData = await loadFromYandexDisk();
         if (cloudData && Array.isArray(cloudData) && cloudData.length > 0) {
           const protectedData = cloudData.map((p: any) => ({ ...p, isSystem: true }));
@@ -298,6 +302,7 @@ function App() {
           if (dbPrompts) setPrompts(dbPrompts);
         }
       } catch (e) {
+        console.error(e);
         const dbPrompts = await loadFromDB<PromptData[]>(STORAGE_KEY);
         if (dbPrompts) setPrompts(dbPrompts);
       } finally {
